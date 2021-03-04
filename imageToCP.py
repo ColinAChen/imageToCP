@@ -333,32 +333,35 @@ def determineBounds(image, degreesToRho):
 			# first pass will check if this line is reasonably close to an intersection, if so, we can snap the line to it
 			# second pass will reference the original line to determine line bounds and and crease types if the image is in color
 			if not vertical:
-				startRow, startCol = getStart((row1,col1), slope, rows-1, vertical=vertical)
-				snappedRow,snappedCol = startRow, startCol
+				startRow, startCol = start = getStart((row1,col1), slope, rows-1, vertical=vertical)
+				offset = (startRow + slope, startCol + 1)
+				snappedRow, snappedCol = snap(start, offset, intersections, snapThreshold)
+				#snappedRow,snappedCol = startRow, startCol
 				print('start',start)
 				# iterate through once to check for intersections
-				for addCol in range(cols - int(startCol)):
-					# step through the line
-					# check if there are any existing intersections nearby
-					# if so, consider snapping to them to the intersection
-					# I think it is easier to modify the line in parametric than in coordinate
-					checkCol = startCol + addCol
-					checkRow = startRow + (slope * addCol)
-					distanceToIntersections = [distance((checkRow, checkCol), intersection) for intersection in intersections]
-					minDistance = min(distanceToIntersections)
-					if (minDistance < snapThreshold):
-						# find the intersection
-						# assume the first one is fine
-						minIndex = distanceToIntersections.index(minDistance)
+				# for addCol in range(cols - int(startCol)):
+				# 	# step through the line
+				# 	# check if there are any existing intersections nearby
+				# 	# if so, consider snapping to them to the intersection
+				# 	# I think it is easier to modify the line in parametric than in coordinate
+				# 	checkCol = startCol + addCol
+				# 	checkRow = startRow + (slope * addCol)
+				# 	snappedRow, 
+				# 	# distanceToIntersections = [distance((checkRow, checkCol), intersection) for intersection in intersections]
+				# 	# minDistance = min(distanceToIntersections)
+				# 	# if (minDistance < snapThreshold):
+				# 	# 	# find the intersection
+				# 	# 	# assume the first one is fine
+				# 	# 	minIndex = distanceToIntersections.index(minDistance)
 
-						snappedRow, snappedCol = intersections[minIndex] # assume the intersections is part of the line
+				# 	# 	snappedRow, snappedCol = intersections[minIndex] # assume the intersections is part of the line
 
-						# consider this point snapped, don't chceck others, might need to check for better matches later
-						break
-				# iterate again to check for line bounds
-				# start at snapped coordinates and check both directions of slope to cover the whole line
-				# hopefully at this point, lines will intersect with other lines
-				# add new intersectiosn here
+				# 	# 	# consider this point snapped, don't chceck others, might need to check for better matches later
+				# 	# 	break
+				# # iterate again to check for line bounds
+				# # start at snapped coordinates and check both directions of slope to cover the whole line
+				# # hopefully at this point, lines will intersect with other lines
+				# # add new intersectiosn here
 
 				# forward iteration
 				startLineSegment = False
@@ -437,28 +440,42 @@ def determineBounds(image, degreesToRho):
 	print(lines)
 	return lines
 
-def snap(point, intersections, snapThreshold):
-	# calculate the distance between every intersection and this line
-	distanceToIntersections = [distance(point, intersection) for intersection in intersections]
+def snap(point1, point2, intersections, snapThreshold):
+	# determine standard form of the line
 
-	# if the minimum distance is withing snapThreshold away,
-	# assume the intersections is part of the line and return the intersection
-	# otherwise, return the point
+	# calculate the distance between every intersection and this line
+	distanceToIntersections = [distanceLineToPoint(point1, point2, intersection) for intersection in intersections]
+	# get the shortest distance
 	minDistance = min(distanceToIntersections)
 	if (minDistance < snapThreshold):
-	# find the intersection
-	# assume the first one is fine
+		# if the minimum distance is withing snapThreshold away,
+		# assume the intersections is part of the line and return the intersection
 		minIndex = distanceToIntersections.index(minDistance)
+		return intersections[minIndex]
+	else:
+		# otherwise, return the point
+		return point
 
-	snappedRow, snappedCol = intersections[minIndex]
-	startPoint = (checkCol, checkRow)
-	return 
-def distanceLineToPoint(a,b,c,point):
-	# ax + by + c
-	# y = mx + b, a = m, b = 1, c = -b
-	x,y = point
-	numerator = abs((a * x) + (b * y) + c)
-	denominator = math.sqrt((a*a) + (b*b))
+'''
+Distance from a point to a line
+https://en.wikipedia.org/wiki/Distance_from_a_point_to_a_line
+
+Arguments:
+	p1 (tuple) : (row,col) point on line
+	p1 (tuple) : (row,col) a different point on line
+	target (tuple) : (row,col) point to caluclate distance to
+Return:
+	distance : distance from point to the line
+'''
+def distanceLineToPoint(p1, p2 ,target):
+	x1,y1 = p1
+	x2,p2 = p2
+	x0,y0 = target
+	((x2 - x1) * (y1 - y0)) * ((x1 - x0) * (y2 - y1))
+	#numerator = abs((a * x) + (b * y) + c)
+	numerator = ((x2 - x1) * (y1 - y0)) * ((x1 - x0) * (y2 - y1))
+	#denominator = math.sqrt((a*a) + (b*b))
+	denominator = distance(p1,p2)
 	return numerator/denominator
 '''
 Calculate the euclidena distance betwen two points
