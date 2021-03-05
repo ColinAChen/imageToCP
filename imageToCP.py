@@ -4,8 +4,17 @@ import argparse
 import math
 
 def main(args):
+	# replace transparent background of png with white
+	#https://stackoverflow.com/questions/53732747/set-white-background-for-a-png-instead-of-transparency-with-opencv/53737420
+	image = cv2.imread(args.pathToImage, cv2.IMREAD_UNCHANGED)
+	#make mask of where the transparent bits are
+	trans_mask = image[:,:,3] == 0
+	#replace areas of transparency with white and not transparent
+	image[trans_mask] = [255, 255, 255, 255]
+	#new image without alpha channel...
+	referenceImage = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
 
-	image = cv2.imread(args.pathToImage)
+	#image = cv2.imread(args.pathToImage)
 	#blank = np.zeros(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY).shape)
 	#blank[0:10, 0:10] = 255
 	#showImage(blank, '00')
@@ -14,7 +23,7 @@ def main(args):
 	lines = parseImage(args.pathToImage)
 	
 	# convert the lines from parametric to cartesian coordinates and determine the bounds of each line
-	finalLines = determineBounds(image, lines)
+	finalLines = determineBounds(referenceImage, lines)
 	
 	# write these lines to a cp file
 	cpFileName = args.pathToImage.split('.')[0] + '.cp'
@@ -32,25 +41,26 @@ Returns:
 def parseImage(pathToImage):
 	# read image
 	#image = cv2.resize(cv2.imread(pathToImage), (400,400))
-	image = cv2.imread(pathToImage)
 	# convert to grayscale
+	image = cv2.imread(pathToImage)
 	grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+	#showImage(grayscale, 'grayscale')
 	# threshold, send any color to black, all others to white
 	ret, grayscale = cv2.threshold(grayscale, 10, 255, cv2.THRESH_BINARY_INV)
 	# resize so that everythig is divisible by 2
-	if (grayscale.shape[0] % 2 != 0):
-		grayscale = cv2.resize(grayscale, (grayscale.shape[0] * 2,grayscale.shape[0] * 2), interpolation=cv2.INTER_NEAREST)
+	# if (grayscale.shape[0] % 2 != 0):
+	# 	grayscale = cv2.resize(grayscale, (grayscale.shape[0] * 2,grayscale.shape[0] * 2), interpolation=cv2.INTER_NEAREST)
 	#grayscale = thresh
 	#showImage(grayscale, 'grayscale')
 	# thin lines so that hough transform doesn't pick up lines on both sides of thick lines
 	
 
-	#grayscale = thinLines(grayscale)
+	grayscale = thinLines(grayscale)
 	
 
 	#cv2.imwrite('gray.png', thresh)
-	#thinned_name = pathToImage.split('.')[0] + '_thinned.png'
-	#cv2.imwrite(thinned_name, grayscale)
+	thinned_name = pathToImage.split('.')[0] + '_thinned.png'
+	cv2.imwrite(thinned_name, grayscale)
 	#showImage(image, 'image')
 	#showImage(thinned, 'thinned')
 	#grayscale = thinned
@@ -252,6 +262,10 @@ def determineBounds(image, degreesToRho):
 	# in the future, use the image as reference to determine the bounds for each line
 	# for now, extend each line to the endge of the image so we can create a cp file
 	#print(image.shape)
+	#image = cv2.imread('fish.png')
+	
+	#print(image[10][10])
+	#print(image[20,30])
 	rows, cols, channels = image.shape
 	lines = []
 	print('\n')
@@ -260,13 +274,13 @@ def determineBounds(image, degreesToRho):
 
 	# assume the corners of the square are intersections
 	# maybe can also assume havles? The user might be able to specify this?
-	intersections = set()
-	intersections.add((0,0))
-	intersections.add((0, rows-1))
-	intersections.add((cols-1, 0))
-	intersections.add((rows-1, cols-1))
+	# intersections = set()
+	# intersections.add((0,0))
+	# intersections.add((0, rows-1))
+	# intersections.add((cols-1, 0))
+	# intersections.add((rows-1, cols-1))
 	snapThreshold = rows/100 # might need to change later based on grid size
-	#intersections = set((0,0), (0, rows-1), (cols-1, 0), (rows-1, cols-1))
+	intersections = [(0,0), (0, rows-1), (cols-1, 0), (rows-1, cols-1)]
 	for angle in degreesToRho:
 		for parametricLine in degreesToRho[angle]:
 			# parametric line = (rho, theta)
@@ -288,22 +302,23 @@ def determineBounds(image, degreesToRho):
 			# 1000 is now just to increase the accuracy of the slope? probably doesn't really matter, it will bring more digits to the left of the decimal
 			# x - col, 
 			# y - row
-			x1 = int(x0 + 1000*(-b))
+			# allow these to be floats, we will round them at the very end
+			x1 = float(x0 + 1000*(-b))
 			col1 = x1
 			#x1 = max(0,x1)
 			#x1 = min(cols, x1)
 
-			y1 = int(y0 + 1000*(a))
+			y1 = float(y0 + 1000*(a))
 			row1 = y1
 			#y1 = max(0,y1)
 			#y1 = min(rows, y1)
 
-			x2 = int(x0 - 1000*(-b))
+			x2 = float(x0 - 1000*(-b))
 			col2 = x2
 			#x2 = max(0,x2)
 			#x2 = min(cols, x2)
 
-			y2 = int(y0 - 1000*(a))
+			y2 = float(y0 - 1000*(a))
 			row2 = y2
 			#y2 = max(0,y2)
 			#y2 = min(rows, y2)
@@ -333,87 +348,137 @@ def determineBounds(image, degreesToRho):
 			# first pass will check if this line is reasonably close to an intersection, if so, we can snap the line to it
 			# second pass will reference the original line to determine line bounds and and crease types if the image is in color
 			if not vertical:
+				print('slope', slope)
 				startRow, startCol = start = getStart((row1,col1), slope, rows-1, vertical=vertical)
 				offset = (startRow + slope, startCol + 1)
 				snappedRow, snappedCol = snap(start, offset, intersections, snapThreshold)
 				#snappedRow,snappedCol = startRow, startCol
-				print('start',start)
-				# iterate through once to check for intersections
-				# for addCol in range(cols - int(startCol)):
-				# 	# step through the line
-				# 	# check if there are any existing intersections nearby
-				# 	# if so, consider snapping to them to the intersection
-				# 	# I think it is easier to modify the line in parametric than in coordinate
-				# 	checkCol = startCol + addCol
-				# 	checkRow = startRow + (slope * addCol)
-				# 	snappedRow, 
-				# 	# distanceToIntersections = [distance((checkRow, checkCol), intersection) for intersection in intersections]
-				# 	# minDistance = min(distanceToIntersections)
-				# 	# if (minDistance < snapThreshold):
-				# 	# 	# find the intersection
-				# 	# 	# assume the first one is fine
-				# 	# 	minIndex = distanceToIntersections.index(minDistance)
-
-				# 	# 	snappedRow, snappedCol = intersections[minIndex] # assume the intersections is part of the line
-
-				# 	# 	# consider this point snapped, don't chceck others, might need to check for better matches later
-				# 	# 	break
-				# # iterate again to check for line bounds
-				# # start at snapped coordinates and check both directions of slope to cover the whole line
-				# # hopefully at this point, lines will intersect with other lines
-				# # add new intersectiosn here
+				print('start',(snappedRow, snappedCol))
 
 				# forward iteration
 				startLineSegment = False
 				startPoint = (-1,-1)
 				endPoint = (-1,-1)
-				for colOffset in range(cols - int(snappedCol)):
-					checkRow = snappedRow + slope*colOffset
+				print('forward range',cols-int(snappedCol))
+				print('snapped col:',snappedCol)
+				print('snapped row:', snappedRow)
+				print('forward iteration')
+				finalRow, finalCol = (0,0)
+				for colOffset in range(cols-int(snappedCol)):
+					checkRow = snappedRow + (slope*colOffset)
 					checkCol = snappedCol + colOffset
-					# round
+					finalRow, finalCol = (checkRow, checkCol)
+					# if (colOffset == 1):
+					# 	print('checkRow', checkRow)
+					# 	print('checkCol', checkCol)
+					# round to access pixels in the original image
 					checkRowInt = int(round(checkRow))
 					checkColInt = int(round(checkCol))
+					# if (checkRowInt % 37 == 0):
+
+					# 	print('checkRowInt', checkRowInt)
+					# 	print('checkColInt', checkColInt)
+					if (checkRowInt < 0 or checkRowInt >= rows or checkColInt < 0 or checkColInt >= cols):
+						#finalRow, finalCol = (checkRow, checkCol)
+						break
 					# check if we are one a line
-					if one line and startLineSegment = False:
+					# might need to check neighbors, depending on how the row and column get rounded
+					# if intensity != white, we are on a line
+					# in the future, check the color
+					# if (checkRowInt == 500):
+					# 	print('row, col, intesity', checkRowInt, checkColInt, image[checkRowInt][checkColInt])
+					if not colorEquals(image[checkRowInt][checkColInt], (255,255,255)) and not startLineSegment:
 						startLineSegment = True
 						# snap if this is close enough to an intersection
-						distanceToIntersections = [distance((checkRow, checkCol), intersection) for intersection in intersections]
-						minDistance = min(distanceToIntersections)
-						if (minDistance < snapThreshold):
-						# find the intersection
-						# assume the first one is fine
-							minIndex = distanceToIntersections.index(minDistance)
-
-						snappedRow, snappedCol = intersections[minIndex]
-						startPoint = (checkCol, checkRow)
-					elif offline and startLineSegment = True:
+						offset = (checkRow + slope, checkCol + 1)
+						startPoint = snap((checkRow, checkCol), offset, intersections, snapThreshold)
+						print('start segment at', startPoint)
+					elif colorEquals(image[checkRowInt][checkColInt], (255,255,255)) and startLineSegment:
 						startLineSegment = False
 						# snap if this is close enough to an intersection
 						# check for intersections and update the list of intersections
-						line = (startPoint, endPoint)
-						print(line)
+						line = (startPoint, snap((checkRow, checkCol), startPoint, intersections, snapThreshold))
+						if (distance(line[0], line[1]) > 10):
+
+							# add all new intersections this line creates to the list of intersections
+							addToIntersections(line, lines, intersections)
+							print('end line', line)
+							#print(line)
+							lines.append(line)
+						else:
+							print('line found is too short')
+				if (startLineSegment):
+					# finish unfinished line segments
+					line = (startPoint, snap((finalRow, finalCol), startPoint, intersections, snapThreshold))
+					if (distance(line[0], line[1]) > 10):
+
+						# add all new intersections this line creates to the list of intersections
+						addToIntersections(line, lines, intersections)
+						print('end line', line)
+						#print(line)
 						lines.append(line)
-
-
-					neighbors = 
-					image[]
-				# backward iteration
+					else:
+						print('line found is too short')
+			# backward iteration
+				print('backward iteration')
 				for colOffset in range(int(snappedCol), -1, -1):
-					checkRow = snappedRow + slope*colOffset
-					checkCol = snappedCol + colOffset
-					# round
+					
+					checkRow = snappedRow + (slope*colOffset*-1)
+					checkCol = snappedCol - colOffset
+					finalRow, finalCol = (checkRow, checkCol)
+					# if (checkRow < 0 or checkRow > rows or checkCol < 0 or checkCol > cols):
+					# 	continue
+					# round to access pixels in the original image
 					checkRowInt = int(round(checkRow))
 					checkColInt = int(round(checkCol))
+					# if (checkRowInt % 37 == 0):
+						
+					# 	print('checkRowInt', checkRowInt)
+					# 	print('checkColInt', checkColInt)
+					if (checkRowInt < 0 or checkRowInt >= rows or checkColInt < 0 or checkColInt >= cols):
+						break
 					# check if we are one a line
-					if one line and startLineSegment = False:
+					# might need to check neighbors, depending on how the row and column get rounded
+					# if intensity != white, we are on a line
+					# in the future, check the color
+					# if (checkRowInt == 500):
+					# 	print('row, col, intesity', checkRowInt, checkColInt, image[checkRowInt][checkColInt])
+					if not colorEquals(image[checkRowInt][checkColInt], (255,255,255)) and not startLineSegment:
 						startLineSegment = True
-						startPoint = (checkCol, checkRow)
-					elif offline and startLineSegment = True:
+						# snap if this is close enough to an intersection
+						offset = (checkRow + slope, checkCol + 1)
+						startPoint = snap((checkRow, checkCol), offset, intersections, snapThreshold)
+						print('start segment at', startPoint)
+					elif colorEquals(image[checkRowInt][checkColInt], (255,255,255)) and startLineSegment:
 						startLineSegment = False
-						line = (startPoint, endPoint)
-						print(line)
-						lines.append(line)
+						# snap if this is close enough to an intersection
+						# check for intersections and update the list of intersections
+						line = (startPoint, snap((checkRow, checkCol), startPoint,intersections, snapThreshold))
+						if (distance(line[0], line[1]) > 10):
 
+							# add all new intersections this line creates to the list of intersections
+							addToIntersections(line, lines, intersections)
+							print('end line', line)
+							#print(line)
+							lines.append(line)
+						else:
+							print('line found is too short')
+				if (startLineSegment):
+					# finish unfinished line segments
+					line = (startPoint, snap((finalRow, finalCol), startPoint, intersections, snapThreshold))
+					if (distance(line[0], line[1]) > 10):
+
+						# add all new intersections this line creates to the list of intersections
+						addToIntersections(line, lines, intersections)
+						print('end line', line)
+						#print(line)
+						lines.append(line)
+					else:
+						print('line found is too short')
+			else:
+				# simple case for vertical lines
+				# vertical means no change in 
+				for row in s
 
 					
 
@@ -430,28 +495,68 @@ def determineBounds(image, degreesToRho):
 			# when we find a white pixel, stop counting
 			# append the line segment to lines
 
-			line = ((x1,y1), (x2,y2))
+			#line = ((x1,y1), (x2,y2))
 			#print(line)
 			#print('')
 
 			#print(x0,y0,x1,y1,x2,y2)
 			#print('\n')
-			lines.append(line)
-	print(lines)
+			#lines.append(line)
+	#print(lines)
+	print(intersections)
 	return lines
 
-def snap(point1, point2, intersections, snapThreshold):
-	# determine standard form of the line
+def colorEquals(color, target):
+	return color[0] == target[0] and color[1] == target[1] and color[2] == target[2]
+'''
+Snap a point to an existing intersection if it is close enough, essentially, move a line to include an existing intersection if it is wthin a certain threshold
 
+Arguments:
+	point (tuple) : (row,col) point on the line, this point will be returned if no existing intersection can be snapped to
+	offset (tuple) : (row, col) an different point on the line
+	intersections (list) : [(row, col), ...] as list of intersection points
+	snapThreshold (number) : must be less than this distance to snap to this point
+Return:
+	snapPoint (tuple) : (row,col) an existing intersection that is close enough to the line to snap to it, or the original point if no existing intersection is close enough
+
+'''
+def snap(point, offset, intersections, snapThreshold):
+	print('find snap for point: ', point)
+	print('using offset:', offset)
 	# calculate the distance between every intersection and this line
-	distanceToIntersections = [distanceLineToPoint(point1, point2, intersection) for intersection in intersections]
+	distanceToIntersections = [distanceLineToPoint(point, offset, intersection) for intersection in intersections]
+	#distanceToPoints = [distance(point, intersection) for intersection in intersections]
+	#print('distances', distanceToIntersections)
 	# get the shortest distance
 	minDistance = min(distanceToIntersections)
 	if (minDistance < snapThreshold):
 		# if the minimum distance is withing snapThreshold away,
 		# assume the intersections is part of the line and return the intersection
-		minIndex = distanceToIntersections.index(minDistance)
-		return intersections[minIndex]
+
+		# also assume that the closest euclidean point is the one we want to snap to
+		# this won't affect snapping to a point for iteration
+		# but will help with snapping to final points after iteration.
+		minIndicies = list(filter(lambda x: distanceToIntersections[x] == minDistance, range(len(distanceToIntersections))))
+		#print(minIndicies)
+		#minIndex = distanceToIntersections.index(minDistance)
+		#print('minIndex', minIndex)
+		#print('snap to ', intersections[minIndex])
+		minDistance = 999999999
+		minIndex = 0
+		for index in minIndicies:
+			checkDistance = distance(point, intersections[index])
+			if (checkDistance < minDistance):
+				minDistance = checkDistance
+				minIndex = index
+		#print('minDistance', minDistance)
+		#print('minIndex', index)
+		
+		if minDistance < snapThreshold:
+			print('snap to ', intersections[minIndex])
+			return intersections[minIndex]
+		else:
+			#print('snap to ', intersections[minIndex])
+			return point
 	else:
 		# otherwise, return the point
 		return point
@@ -469,11 +574,21 @@ Return:
 '''
 def distanceLineToPoint(p1, p2 ,target):
 	x1,y1 = p1
-	x2,p2 = p2
+	x2,y2 = p2
 	x0,y0 = target
-	((x2 - x1) * (y1 - y0)) * ((x1 - x0) * (y2 - y1))
+	if (x1 == x2):
+		# horizontal line, travels along a row
+		# return y displacement (column difference)
+		#print('horizontal line')
+		return abs(x1 - x0)
+	if (y1 == y2):
+		# vertical line, travels along the same column
+		# return x displacement (row difference)
+		#print('vertical line')
+		return abs(y1 - y0)
+	#((x2 - x1) * (y1 - y0)) * ((x1 - x0) * (y2 - y1))
 	#numerator = abs((a * x) + (b * y) + c)
-	numerator = ((x2 - x1) * (y1 - y0)) * ((x1 - x0) * (y2 - y1))
+	numerator = abs(((x2 - x1) * (y1 - y0)) - ((x1 - x0) * (y2 - y1)))
 	#denominator = math.sqrt((a*a) + (b*b))
 	denominator = distance(p1,p2)
 	return numerator/denominator
@@ -491,7 +606,7 @@ def distance(point1, point2):
 '''
 Determine if two line segments intersect
 https://stackoverflow.com/questions/3838329/how-can-i-check-if-two-segments-intersect
-
+https://www.geeksforgeeks.org/check-if-two-given-line-segments-intersect/
 Arguments:
 	line1 : ((x1, y1), (x2, y2)), line segment 1
 	line2 : ((x1, y1), (x2, y2)), line segment 2
@@ -500,8 +615,82 @@ Returns:
 
 '''
 def lineSegmentIntsersect(line1, line2):
-	pass
+	p1,q1 = line1
+	p2,q2 = line2
 
+	# Find the 4 orientations required for  
+	# the general and special cases 
+	o1 = orientation(p1, q1, p2) 
+	o2 = orientation(p1, q1, q2) 
+	o3 = orientation(p2, q2, p1) 
+	o4 = orientation(p2, q2, q1) 
+	# General case 
+	if ((o1 != o2) and (o3 != o4)): 
+		return True
+	return False
+	# Special Cases 
+
+	# # p1 , q1 and p2 are colinear and p2 lies on segment p1q1 
+	# if ((o1 == 0) and onSegment(p1, p2, q1)): 
+	# 	return True
+
+	# # p1 , q1 and q2 are colinear and q2 lies on segment p1q1 
+	# if ((o2 == 0) and onSegment(p1, q2, q1)): 
+	# 	return True
+
+	# # p2 , q2 and p1 are colinear and p1 lies on segment p2q2 
+	# if ((o3 == 0) and onSegment(p2, p1, q2)): 
+	# 	return True
+
+	# # p2 , q2 and q1 are colinear and q1 lies on segment p2q2 
+	# if ((o4 == 0) and onSegment(p2, q1, q2)): 
+	# 	return True
+
+	# # If none of the cases 
+	# return False
+def onSegment(p,q,r):
+	px,py = p
+	qx,qy = q
+	rx,ry = r
+	return qx <= max(px, rx) and qx >= min(px, rx) and qy <= max(py, ry) and qy >= min(py, ry)
+
+def orientation(p,q,r):
+	# 0, colinear, slopes are the same
+	# 1 clockwise points
+	# 2 counter clockwise
+	px,py = p
+	qx,qy = q
+	rx,ry = r
+	value = (float(qy-py) * (rx-qx)) - (float(qx-px) * (ry-qy)) 
+	if (value > 0):
+		return 1
+	elif (value < 0):
+		return 2
+	else:
+		return 0
+def addToIntersections(newLine, lines, intersections):
+	for line in lines:
+		if lineSegmentIntsersect(newLine, line):
+			intersection = findLineSegmentIntersect(newLine, line)
+			intersections.append(intersection)
+def findLineSegmentIntersect(line1, line2):
+	#https://stackoverflow.com/questions/20677795/how-do-i-compute-the-intersection-point-of-two-lines
+	print(line1)
+	print(line2)
+	xdiff = (line1[0][0] - line1[1][0], line2[0][0] - line2[1][0])
+	ydiff = (line1[0][1] - line1[1][1], line2[0][1] - line2[1][1])
+
+	def det(a, b):
+		return a[0] * b[1] - a[1] * b[0]
+
+	div = det(xdiff, ydiff)
+	if div == 0:
+		raise Exception('lines do not intersect')
+
+	d = (det(*line1), det(*line2))
+	x = det(d, xdiff) / div
+	y = det(d, ydiff) / div
+	return x, y
 '''
 Find the leftmost intersection between this line and the square
 
@@ -515,6 +704,7 @@ Return:
 def getStart(point, slope, length, vertical=False):
 	# slope = change in row/change in column
 	row,col = point
+	print('finding start for', point)
 	if (vertical):
 		# this is a vertical line, return the column intersection with row 0
 		return (0, col)
@@ -525,24 +715,15 @@ def getStart(point, slope, length, vertical=False):
 		# point is on the left edge, this is an optimal starting point
 		return point
 	else:
-	# #if (row == 0 or row == length):
-	# elif (0 <= row <= length and 0 <= col <= length):
-	# 	# point is inside the square
-	# 	## point is on the bottom edge, there is a better start if the slope is negative
-	# 	## negative slope means the line intersects the square on the left or top edge
-
 		### GENERAL ALGORITHM ###
-		# Reverse slope
-		# check if changing column to zero sends the row to a point on the left edge
-		# if not, the point must intersect on the top edge 
-		# calculate where changing the row length times will send the column
-
-		# if (slope > 0):
-		# 	# positive slope will point us towards the right, therefore this point is optimal
-		# 	return point
+		# check the intersection with the left edge
+		# if the row is on the left edge, return that point
+		# if the row is above the left edge, return the intersection with the top edge
+		# if the row is below the left edge, return the intersection with the bottom edge
 
 		# conceptually, -1 will either swap col in the case the col < 0 or swap slope inthe case that col > 0
-		leftRow = (col * slope * -1)
+		leftRow = (col * slope * -1) + row
+		print('left row', leftRow)
 		if (0 <= leftRow <= length):
 			# intersection with the left edge is in bounds
 			return (leftRow, 0)
@@ -552,33 +733,6 @@ def getStart(point, slope, length, vertical=False):
 		else:
 			# intersection with top edgess
 			return (length, col - ((length-row) / slope))
-		
-	# # if (row == length):
-	# # 	# point is on top edge, we can reach a better start if the slope is positive
-	# # 	# positive slope means the line intersects the square on the left or bottom edge
-	# # 	if (slope < 0):
-	# # 		return point
-	# # 	leftRow = length - (slope * (length - col))
-	# # 	if (0 <= rightRow <= length):
-	# # 		return (rightRow, 0)
-	# # 	else:
-	# # 		return (0, )
-		
-
-	# else:
-	# 	# point is outside the square
-	# 	# determine which direction 
-	# 	if (col < 0):
-	# 		# point is behind the left edge, simply send it along until it reaches the left edge
-	# 		return (-1 * col * slope, 0)
-	# 	elif (col > length):
-	# 		# point is past the right edge
-	# 		# find the itersection with the top, bottom, or left edge
-	# 		# negative slope w
-
-
-		
-	
 
 
 '''
@@ -591,6 +745,7 @@ Returns:
 	No return but will create a file at path of pathToCP in the .cp file format
 '''
 def writeCP(pathToCP, lines):
+	print('writing to ', pathToCP)
 	with open(pathToCP, 'w+') as f:
 
 		for line in lines:
