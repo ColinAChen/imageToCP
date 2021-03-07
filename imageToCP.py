@@ -336,19 +336,19 @@ def determineBounds(image, degreesToRho, grid=0, startingAngle=0):
 		# top edge, bottom edge, left edge, right edge, bottom left, bottom, right, top left, top right
 		# add edge intersections with 22.5 folds
 		# bottom edge
-
-		intersections.append((0, (cols-1) * math.tan(math.pi/8)))
-		#print(intersections)
-		intersections.append((0, (cols-1) * (1 - math.tan(math.pi/8))))
+		first = (cols-1) * math.tan(math.pi/8)
+		second = (cols-1) * (1 - math.tan(math.pi/8))
+		intersections.append((0, first))
+		intersections.append((0, second))
 		# top edge
-		intersections.append((rows-1, (cols-1) * math.tan(math.pi/8)))
-		intersections.append((rows-1, (cols-1) * (1 - math.tan(math.pi/8))))
+		intersections.append((rows-1, first))
+		intersections.append((rows-1, second))
 		# left edge
-		intersections.append(((cols-1) * math.tan(math.pi/8), 0))
-		intersections.append(((cols-1) * (1 - math.tan(math.pi/8)), 0))
+		intersections.append((first, 0))
+		intersections.append((second, 0))
 		# right edge
-		intersections.append(((cols-1) * math.tan(math.pi/8), cols-1))
-		intersections.append(((cols-1) * (1 - math.tan(math.pi/8)), cols-1))
+		intersections.append((first, cols-1))
+		intersections.append((second, cols-1))
 		# add intersections betwen 22.5 and diagonals
 		left = (rows-1) / (1 + (math.tan(3 * (math.pi/8))))
 		right = (rows-1) / (1 + math.tan(math.pi/8))
@@ -359,10 +359,10 @@ def determineBounds(image, degreesToRho, grid=0, startingAngle=0):
 		intersections.append((right,left))
 		intersections.append((right,right))
 		# add intersections betwen 22.5 and 22.5
-		intersections.append(((rows-1)/2, left/2))
-		intersections.append(((rows-1)/2, right + (left/2)))
-		intersections.append((left/2, (cols-1)/2))
-		intersections.append((right + (left/2), (cols-1)/2))
+		intersections.append(((rows-1)/2, first/2))
+		intersections.append(((rows-1)/2, second + (first/2)))
+		intersections.append((first/2, (cols-1)/2))
+		intersections.append((second + (first/2), (cols-1)/2))
 	print(intersections)
 	for angle in degreesToRho:
 		for parametricLine in degreesToRho[angle]:
@@ -850,7 +850,7 @@ def orientation(p,q,r):
 		return 2
 	else:
 		return 0
-def addToIntersections(newLine, lines, intersections):
+def addToIntersections(newLine, lines, intersections, rejectThreshold=10):
 	print('registering intersections for',newLine)
 	# add line endpoints as possible intersections for future lines
 	# the nature of adding lines in a weird order means that they will be future intersections
@@ -867,8 +867,8 @@ def addToIntersections(newLine, lines, intersections):
 
 			intersection = findLineSegmentIntersect(newLine, line)
 			print(newLine, 'intersects with', line, 'at', intersection)
-			if (intersection not in intersections):
-
+			if min([distance(intersection, checkIntersection) for checkIntersection in intersections]) > rejectThreshold:
+			#if (intersection not in intersections):
 				intersections.append(intersection)
 
 '''
