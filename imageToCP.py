@@ -113,7 +113,7 @@ def parseImage(image, pathToImage='',pathToThinned='',needThinLines=False):
 	# perform line detection
 	edges = cv2.Canny(grayscale, 50, 150, apertureSize=3)
 	#print(edges)
-	votes = 20
+	votes = 50
 
 	lines = cv2.HoughLines(edges,.5,np.pi/32,votes)
 	blank = np.zeros(grayscale.shape)
@@ -156,7 +156,7 @@ def parseImage(image, pathToImage='',pathToThinned='',needThinLines=False):
 			cv2.line(blank,(x1,y1),(x2,y2),(255,255,255),2)
 			#showImage(blank, 'line')
 			#blank = np.zeros(blank.shape)
-	#showImage(blank, 'blank w/ lines')
+	showImage(blank, 'blank w/ lines')
 	print(degreesToRho)
 	return degreesToRho
 	#parametricCoordinates = []
@@ -509,6 +509,7 @@ def referenceImage(start, slope, intersections, lines, image, snapThreshold, for
 	endPoint = (-1,-1)
 	# 
 	rollingAverageColor = [0,0,0] #currently getting rounded, not sure how that is affecting the accuracy
+	startColor = [0,0,0]
 	# consider changing to most populous color
 	# dict {color : frequency}
 	linePixels = 0
@@ -544,6 +545,11 @@ def referenceImage(start, slope, intersections, lines, image, snapThreshold, for
 		# in the future, check the color
 		# if (checkRowInt == 500):
 		# 	print('row, col, intesity', checkRowInt, checkColInt, image[checkRowInt][checkColInt])
+
+		# a line segment ends if it is different than the previous color
+		# keep track of the starting color, end the semgment if the color is different
+		# it's possible we won't be able to continue occluded lines?
+		# maybe try to combine lines after the fact?
 		if not colorEquals(image[checkRowInt][checkColInt], (255,255,255)) and not startLineSegment:
 			print('start line at',checkRow, ',',checkCol,'with intensity', image[checkRowInt][checkColInt])
 			startLineSegment = True
@@ -551,22 +557,29 @@ def referenceImage(start, slope, intersections, lines, image, snapThreshold, for
 			offset = (checkRow + slope, checkCol + 1)
 			startPoint, startOffset = snap((checkRow, checkCol), offset, intersections, snapThreshold)
 			print('start segment at', startPoint)
+			# keep track of the starting color
+			# assign start color as max of red or blue for checking later
+			startColor = image[checkRowInt][checkColInt]
 			# keep track of the color as a rolling average
 			# this will allow us to determine the color of lines even if they are occluded by differently colored lines
-			rollingAverageColor = image[checkRowInt][checkColInt]
-			linePixels = 1
-			highlightPoint((checkColInt,checkRowInt),image.copy())
-		elif not colorEquals(image[checkRowInt][checkColInt], (255,255,255)) and startLineSegment:
+			#rollingAverageColor = image[checkRowInt][checkColInt]
+			#linePixels = 1
+			#highlightPoint((checkColInt,checkRowInt),image.copy())
+
+		# don't need to do anything along a line
+		#elif not colorEquals(image[checkRowInt][checkColInt], (255,255,255)) and startLineSegment:
+		#elif colorEquals(image[checkRowInt][checkColInt], startColor) and startLineSegment:
 			#print('rollingAverageColor', rollingAverageColor)
 			#print('referencePixel',image[checkRowInt][checkColInt])
 			# we are currently on an unfinished line segment, just keep track of the color
 			# keep track of the rolling average pixel
-			index = 0
-			for averagePixel, referencePixel in zip(rollingAverageColor, image[checkRowInt][checkColInt]):
-				rollingAverageColor[index] = ((averagePixel * linePixels) + referencePixel) / (linePixels + 1)
-				index += 1
-			linePixels += 1
-		elif colorEquals(image[checkRowInt][checkColInt], (255,255,255)) and startLineSegment:
+			# index = 0
+			# for averagePixel, referencePixel in zip(rollingAverageColor, image[checkRowInt][checkColInt]):
+			# 	rollingAverageColor[index] = ((averagePixel * linePixels) + referencePixel) / (linePixels + 1)
+			# 	index += 1
+			# linePixels += 1
+		#elif colorEquals(image[checkRowInt][checkColInt], (255,255,255)) and startLineSegment:
+		elif not colorEquals(image[checkRowInt][checkColInt], startColor) and startLineSegment:
 			# we have started a line and just encountered a white pixel
 			# this means the line we are on has finished
 			startLineSegment = False
@@ -577,23 +590,24 @@ def referenceImage(start, slope, intersections, lines, image, snapThreshold, for
 			if (distance(line[0], line[1]) > minSegmentLength):
 				# determine the line type
 				# opencv pixel intensities are returned as BlueGreenRed
-				print('rollingAverageColor for line:',rollingAverageColor)
-				lineType = 1
-				if (distance(rollingAverageColor, RED) < colorThreshold):
-					# red line indicates mountain fold
-					# .cp -> mountain fold is 2
-					print('mountain fold')
-					lineType = 2
-				elif (distance(rollingAverageColor, BLUE) < colorThreshold):
-					# blue line indiciates valley fold
-					# .cp -> valley fold is 3
-					print('valley fold')
-					lineType = 3
+				# print('rollingAverageColor for line:',rollingAverageColor)
+				# lineType = 1
+				# if (distance(rollingAverageColor, RED) < colorThreshold):
+				# 	# red line indicates mountain fold
+				# 	# .cp -> mountain fold is 2
+				# 	print('mountain fold')
+				# 	lineType = 2
+				# elif (distance(rollingAverageColor, BLUE) < colorThreshold):
+				# 	# blue line indiciates valley fold
+				# 	# .cp -> valley fold is 3
+				# 	print('valley fold')
+				# 	lineType = 3
+				lineType = getLineType(startColor)
 				# add all new intersections this line creates to the list of intersections
 				#addToIntersections(line, lines, intersections)
 				addToIntersections(line, lines.keys(), intersections)
 				print('end line', line)
-				showLine(line, blank.copy())
+				#showLine(line, blank.copy())
 				#blank = np.zeros(blank.shape)
 				#print(line)
 				#lines.append(line)
@@ -612,22 +626,23 @@ def referenceImage(start, slope, intersections, lines, image, snapThreshold, for
 		if (0<=line[1][0]<=rows-1 and 0<=line[1][1]<=rows-1 and distance(line[0], line[1]) > minSegmentLength):
 			# determine the line type
 			# opencv pixel intensities are returned as BlueGreenRed
-			print('rollingAverageColor for line:',rollingAverageColor)
-			lineType = 1
-			if (distance(rollingAverageColor, RED) < colorThreshold):
-				# red line indicates mountain fold
-				# .cp -> mountain fold is 2
-				print('mountain fold')
-				lineType = 2
-			elif (distance(rollingAverageColor, BLUE) < colorThreshold):
-				# blue line indiciates valley fold
-				# .cp -> valley fold is 3
-				print('valley fold')
-				lineType = 3
+			#print('rollingAverageColor for line:',rollingAverageColor)
+			# lineType = 1
+			# if (distance(rollingAverageColor, RED) < colorThreshold):
+			# 	# red line indicates mountain fold
+			# 	# .cp -> mountain fold is 2
+			# 	print('mountain fold')
+			# 	lineType = 2
+			# elif (distance(rollingAverageColor, BLUE) < colorThreshold):
+			# 	# blue line indiciates valley fold
+			# 	# .cp -> valley fold is 3
+			# 	print('valley fold')
+			# 	lineType = 3
+			lineType = getLineType(startColor)
 			# add all new intersections this line creates to the list of intersections
 			addToIntersections(line, lines.keys(), intersections)
 			print('end line', line)
-			showLine(line, blank.copy())
+			#showLine(line, blank.copy())
 			#blank = np.zeros(blank.shape)
 			#print(line)
 			#lines.append(line)
@@ -658,6 +673,17 @@ Only used because tuple and numpy channel array are slightly different
 '''
 def colorEquals(color, target):
 	return color[0] == target[0] and color[1] == target[1] and color[2] == target[2]
+
+def getLineType(color):
+	# return 1 for none
+	# return 2 for mountain
+	# return 3 for valley
+	if (color[0] > color[1] and color[0] > color[2]):
+		return 3
+	elif (color[2] > color[0] and color[2] > color[1]):
+		return 2
+	else:
+		return 1
 
 '''
 Snap a point to an existing intersection if it is close enough, essentially, move a line to include an existing intersection if it is wthin a certain threshold
