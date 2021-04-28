@@ -1,12 +1,11 @@
-import numpy as np
-import cv2
-import argparse
-import math
-import os
-
+from util import *
+from lineTest import *
 def main(args):
-	
+	print(args)
+	print(args.pathToImage)
 	image = cv2.imread(args.pathToImage, cv2.IMREAD_UNCHANGED)
+	image = cropSquare(image)
+	showImage(image,'square')
 	referenceImage = image
 	if(args.pathToImage.split('.')[1] == 'png'):
 		# replace transparent background of png with white
@@ -38,14 +37,14 @@ def main(args):
 		if os.path.isfile(args.pathToThinned):
 			# there is a file at pathToThinned, assume it is legit and use it to calculate lines
 			thinnedImage = cv2.imread(args.pathToThinned)
-			lines = parseImage(thinnedImage)
+			lines = parseImage(thinnedImage,pathToImage=args.pathToImage, pathToThinned=args.pathToThinned,stepAngle=args.stepAngle, grid=args.grid)
 		else:
 			# no file was found so we must create one
-			lines = parseImage(referenceImage, pathToThinned=args.pathToThinned, needThinLines=True)
+			lines = parseImage(referenceImage, pathToThinned=args.pathToThinned, needThinLines=True, stepAngle=args.stepAngle, grid=args.grid)
 	else:
 		# no path to thinned was specified, we will run the line thinning algorithm and save the image at an automatically generated path
 		# might change later to not save at all
-		lines = parseImage(referenceImage, pathToImage=args.pathToImage,needThinLines=True)
+		lines = parseImage(referenceImage, pathToImage=args.pathToImage,needThinLines=True, stepAngle=args.stepAngle, grid=args.grid)
 	
 	# convert the lines from parametric to cartesian coordinates and determine the bounds of each line
 	finalLines = determineBounds(referenceImage, lines, grid=args.grid, startingAngle=args.angle)
@@ -64,27 +63,30 @@ Returns:
 	degreesToRho {degrees (float) : [(distance from origin (float), radians from origin (float)) , ...]}
 		For a degree we find a line, retrieve a list of distances and angles in radians. 
 '''
-def parseImage(image, pathToImage='',pathToThinned='',needThinLines=False):
+def parseImage(image, pathToImage='',pathToThinned='',needThinLines=False, stepAngle=0, grid=0):
 	# read image
 	#image = cv2.resize(cv2.imread(pathToImage), (400,400))
 	# convert to grayscale
 	#image = cv2.imread(pathToImage)
-	grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+	
 	#showImage(grayscale, 'grayscale')
 	#showImage(grayscale, 'grayscale')
 	# threshold, send any color to black, all others to white
-	ret, grayscale = cv2.threshold(grayscale, 250, 255, cv2.THRESH_BINARY)
+	
 	# resize so that everythig is divisible by 2
 	# if (grayscale.shape[0] % 2 != 0):
 	# 	grayscale = cv2.resize(grayscale, (grayscale.shape[0] * 2,grayscale.shape[0] * 2), interpolation=cv2.INTER_NEAREST)
 	#grayscale = thresh
-	#showImage(grayscale, 'grayscale')
-
+	#showImage(image, 'grayscale')
+	showImage(image, 'received from main')
 	if (needThinLines):
 		print('no thinned lines image provided, running line thinning algorithm')
+		grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+		ret, grayscale = cv2.threshold(grayscale, 200, 255, cv2.THRESH_BINARY)
 		# thin lines so that hough transform doesn't pick up lines on both sides of thick lines
+		showImage(grayscale, 'image before thinning')
 		grayscale = thinLines(grayscale)
-		
+		#grayscale = zhangSuen(grayscale)
 
 		#cv2.imwrite('gray.png', thresh)
 		if (pathToThinned != ''):
@@ -95,12 +97,15 @@ def parseImage(image, pathToImage='',pathToThinned='',needThinLines=False):
 		#showImage(image, 'image')
 		#showImage(thinned, 'thinned')
 		#grayscale = thinned
-
-		
 	
-	#grayscale = cv2.imread('thinned.png',cv2.IMREAD_GRAYSCALE)
+		#grayscale = cv2.imread(pathToThinned,cv2.IMREAD_GRAYSCALE)
+	else:
+		#grayscale = image
+		grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
 	#grayscale = cv2.resize(grayscale, (1000,1000))
-	#showImage(grayscale, 'thinned')
+	ret, grayscale = cv2.threshold(grayscale, 200, 255, cv2.THRESH_BINARY_INV)
+	showImage(grayscale, 'thinned')
 	#print(grayscale.shape)
 	# for col in range(0,grayscale.shape[1]):
 	# 	if (grayscale[100][col] == 0):
@@ -112,11 +117,51 @@ def parseImage(image, pathToImage='',pathToThinned='',needThinLines=False):
 	#showImage(grayscale, 'fish_thinned')
 	# perform line detection
 	edges = cv2.Canny(grayscale, 50, 150, apertureSize=3)
+	#print(edges.shape)
+	#showImage(edges, 'edges')
 	#print(edges)
-	votes = 50
+	# maybe change votes to be based on the square size/grid size
+	# I can see this being a potential issue 
+	
+	
+	print('using grid of ',grid)
+	
+	#votes = 20
+	rows,cols = (-1,-1)
+	if (len(grayscale.shape) == 2):
+		rows,cols = grayscale.shape
+	else:
+		rows,cols,channels = grayscale.shape
+	#print(grayscale.shape)
 
-	lines = cv2.HoughLines(edges,.5,np.pi/32,votes)
+	votes = int(min(rows,cols) / grid) - 1
+	
+	print('minimum votes required: ', votes)
+	angle = (stepAngle/360) * 2 * np.pi
+	print('using angle step size of ',stepAngle, ' degrees, ',angle,' radians')
+	lines = cv2.HoughLines(edges,.5,angle,votes)
+	lines = cv2.HoughLines(grayscale, .5, angle, votes)
+	# try probabilistic hough transform to estimate endpoints
 	blank = np.zeros(grayscale.shape)
+	#grayscale = cv2.imread(pathToImage)
+	#grayscale = cv2.cvtColor(grayscale, cv2.COLOR_BGR2GRAY)
+	#showImage(grayscale,'test')
+	# lines = cv2.HoughLinesP(grayscale, .5, angle, votes)
+	# if lines is not None:
+	# 	for i in range(0, len(lines)):
+	# 		l = lines[i][0]
+	# 		cv2.line(blank, (l[0], l[1]), (l[2], l[3]), (255,255,255), 2, cv2.LINE_AA)
+	# showImage(blank, 'houghlinesP_thinned')
+
+	# blank = np.zeros(grayscale.shape)
+	# lines = cv2.HoughLinesP(edges, .5, angle, votes)
+	# if lines is not None:
+	# 	for i in range(0, len(lines)):
+	# 		l = lines[i][0]
+	# 		cv2.line(blank, (l[0], l[1]), (l[2], l[3]), (255,255,255), 2, cv2.LINE_AA)
+	# showImage(blank, 'houghlinesP_edges')
+
+	
 	print(lines)
 	print('\n')
 	# loopkup a list of distances based on an angle
@@ -153,11 +198,12 @@ def parseImage(image, pathToImage='',pathToThinned='',needThinLines=False):
 			y2 = int(y0 - 2000*(a))
 			#print(x0,y0,x1,y1,x2,y2)
 			#print('\n')
-			cv2.line(blank,(x1,y1),(x2,y2),(255,255,255),2)
+			#if (random.randint(0,20) < 5):
+			cv2.line(blank,(x1,y1),(x2,y2),(255,255,255),1)
 			#showImage(blank, 'line')
 			#blank = np.zeros(blank.shape)
 	showImage(blank, 'blank w/ lines')
-	print(degreesToRho)
+	#print(degreesToRho)
 	return degreesToRho
 	#parametricCoordinates = []
 	# for angle in degreesToRho:
@@ -177,111 +223,36 @@ def parseImage(image, pathToImage='',pathToThinned='',needThinLines=False):
 	# showImage(blank, 'lines')
 	#return lines
 
-'''
-Thin lines found in an image
-White (255) : background
-Black (0)	: foreground/line color
-	Invert your image if this is not the case
-
-Arguments:
-	image (image as numpy array) : image to thin lines in
-Returns:
-	image (image as numpy array) : image is modified in place but return it anyway 
-'''
-def thinLines(image):
-	# using the Zhang-Suen image line thinning algorithm
-	# https://rosettacode.org/wiki/Zhang-Suen_thinning_algorithm#Python
-	#print(image.shape	)
-	rows, cols = image.shape
-	# avoid the first and last pixels to ensure pixels always have 8 neighbors
-	#numChanges = 0
-	step1Changes = [(-1,-1)]
-	step2Changes = [(-1,-1)]
-	firstPass = True
-	iteration = 1
-	while (step1Changes or step2Changes):
-		# step 1
-		step1Changes = []
-		for row in range(1,rows-1):
-			for col in range(1,cols-1):
-				P2,P3,P4,P5,P6,P7,P8,P9 = n = getNeighbors(row, col, image)
-				#if (row > 500 and row < 510 and col == 20):
-					#print('row,col',row,col)
-					#print(n)
-					#print(transitions(n))
-					#print(sum(n))
-					#print('\n')
-				if (image[row][col] == 0 	and # condition 0, pixel is black
-					(float(P4) * P6 * P8 == 0) 	and # condition 4 at least one of right, down, left is white
-					(float(P2) * P4 * P6 == 0) 	and # condition 3 at least one of up, right, down is white
-					transitions(n) == 1		and # condition 2 there is only one transition from white to black in the list of neighbors
-					2*255 <= sum(n) <= 6*255	# condition 1 there are at least two black neighbors and no more than 6
-					):
-					step1Changes.append((row,col))
-		# set all pixels to change from step 1 to white
-		#print('step1 changes', step1Changes)
-		print('num step 1 changes:', len(step1Changes))
-		for row, col in step1Changes: image[row][col] = 255
-
-		# step 2
-		step2Changes = []
-		for row in range(1,rows-1):
-			for col in range(1,cols-1):
-				P2,P3,P4,P5,P6,P7,P8,P9 = n = getNeighbors(row, col, image)
-				if (image[row][col] == 0 	and # condition 0, pixel is black
-					(float(P2) * P6 * P8 == 0) 	and # condition 4 at least one of right, down, left is white
-					(float(P2) * P4 * P8 == 0) 	and # condition 3 at least one of up, right, down is white
-					transitions(n) == 1		and # condition 2 There is only one transition from white to black in the list of neighbors
-					2* 255 <= sum(n) <= 6 * 255			# condition 1 there are at least two black neighbors and no more than 6
-					):
-					step2Changes.append((row,col))
-		# set all pixels to change from step 1 to white
-		#print('step2 changes', step2Changes)
-		print('num step 2 changes:', len(step2Changes))
-		for row, col in step2Changes: image[row][col] = 255
-		showImage(image, 'in progress')
-		## path = 'thinned_' + str(iteration) + '.png'
-		## iteration += 1
-		## cv2.imwrite(path, image)
-	return image
 
 '''
-Get the eight neighbors of a pixel in the order specified by the Zhange-Suen line thinning algorithm
+dfsLines, use depth first search to approximate line starts and slopes, use this an alternative to hough line transform
 
-Arguments:
-	row (int) : row of target pixel
-	col (int) : column of target pixel
-	image (image as numpy array) : image target pixel and neighbors are from
+Arguments: 
+	image (image as numpy array) : copy of binary grayscale, line thinned image of crease. Idealy, lines will have at thickness of 1 pixel
 
-Returns:
-	neighbors (list) : [intesity of up, up-right, right, down-right, down, down-left, left, up-left]
+Returns: 
+	List of line endppoints
 '''
-def getNeighbors(row, col, image):
-				
-	return [
-		image[row+1][col],
-		image[row+1][col+1],
-		image[row][col+1],
-		image[row-1][col+1],
-		image[row-1][col],
-		image[row-1][col-1],
-		image[row][col-1],
-		image[row+1][col-1]
-		]
+def dfsLines(image):
+	'''
+	for pixel in image:
 
-'''
-Get the number of transitions from black to white, might actually be reversed but doesn't seem to affect the output
+		if (pixel is black (on a line)):
+			add pixel to stack
+			dfsHelper(on black neighbors, these should all be unique lines themselves) -> last pixel in this line
+			set pixel to white as we go
+			add start, end to list
+			return list of points
+		
 
-Arguments:
-	neighbors (list) : list of neighbors, pass output from getNeighbors to ensure correct order
-Returns:
-	transitions (int) : number of transitions from black to white in the neighbor list
-'''
-def transitions(neighbors):
-	# how many times do pixels in the neighbor list swap from white to black?
-	# 0: black, part of object, 1: white, part of background
-	n = neighbors + neighbors[0:1]
-	return sum((n1,n2) == (0,255) for n1, n2 in zip(n,n[1:]))
+	'''
+	pass
+def dfsRecursiveHelper(row, col, image):
+	pass
+
+
+
+
 
 '''
 Reconstruct the crease pattern by running along the lines we found and referencing the original image
@@ -352,8 +323,8 @@ def determineBounds(image, degreesToRho, grid=0, startingAngle=0):
 		# add intersections betwen 22.5 and diagonals
 		left = (rows-1) / (1 + (math.tan(3 * (math.pi/8))))
 		right = (rows-1) / (1 + math.tan(math.pi/8))
-		print('left', left)
-		print('right', right)
+		#print('left', left)
+		#print('right', right)
 		intersections.append((left, left))
 		intersections.append((left,right))
 		intersections.append((right,left))
@@ -363,14 +334,34 @@ def determineBounds(image, degreesToRho, grid=0, startingAngle=0):
 		intersections.append(((rows-1)/2, second + (first/2)))
 		intersections.append((first/2, (cols-1)/2))
 		intersections.append((second + (first/2), (cols-1)/2))
-	print(intersections)
+	#print(intersections)
+
+	#toolbar_width = 15
+	# setup toolbar
+	#sys.stdout.write("[%s]" % (" " * toolbar_width))
+	#sys.stdout.flush()
+	#sys.stdout.write("\b" * (toolbar_width+1)) # return to start of line, after '['
+	completedAngles = 0
+
+	#sys.stdout.write("completed angles: %d/%d" % (completedAngles, len(degreesToRho)))
+	#sys.stdout.flush()
+
+	#sys.stdout.write("\b" * (18))
 	for angle in degreesToRho:
+		#sys.stdout.write("%d/%d" % (completedAngles, len(degreesToRho)))
+		#sys.stdout.flush()
+		#sys.stdout.write("\b" * (18))
+		#completedAngles += 1
+		# progress bar
+		# https://stackoverflow.com/questions/3160699/python-progress-bar
+		print('working on lines with angle ',angle)
 		for parametricLine in degreesToRho[angle]:
+			
 			# parametric line = (rho, theta)
-			print('')
-			print('angle', angle)
+			#print('')
+			#print('angle', angle)
 			#print('rho', degreesToRho[angle])
-			print('rho', parametricLine[0])
+			#print('rho', parametricLine[0])
 			# a = np.cos(degreesToRho[angle][1])
 			# b = np.sin(degreesToRho[angle][1])
 			a = np.cos(parametricLine[1])
@@ -379,8 +370,8 @@ def determineBounds(image, degreesToRho, grid=0, startingAngle=0):
 			# y0 = b*degreesToRho[angle][0]
 			x0 = a*parametricLine[0]
 			y0 = b*parametricLine[0]
-			print('x0',x0)
-			print('y0',y0)
+			#print('x0',x0)
+			#print('y0',y0)
 			### 3000 is arbitarty, I am trying to shoot every line off the page but might need to revisit for larger images
 			# 1000 is now just to increase the accuracy of the slope? probably doesn't really matter, it will bring more digits to the left of the decimal
 			# x - col, 
@@ -417,7 +408,7 @@ def determineBounds(image, degreesToRho, grid=0, startingAngle=0):
 			if (col2-col1 == 0):
 				# no change in col == no change in x
 				vertical = True
-				print('slope: vertical')
+				#print('slope: vertical')
 			elif (row2 - row1) > 0:
 				# x1 towards x2 is positive
 				slope = (row2 - row1) / (col2 - col1)
@@ -431,14 +422,15 @@ def determineBounds(image, degreesToRho, grid=0, startingAngle=0):
 			# in this step, we will reference the original and try to rebuild the crease pattern with intersection accuracy
 			# first pass will check if this line is reasonably close to an intersection, if so, we can snap the line to it
 			# second pass will reference the original line to determine line bounds and and crease types if the image is in color
+			minSegmentLength = int(min(rows,cols) / grid) - 1
 			if not vertical:
 				# forward pass
-				referenceImage((row1, col1), slope, intersections, lines, image, snapThreshold, forward=True, vertical=False)
+				referenceImage((row1, col1), slope, intersections, lines, image, snapThreshold, forward=True, vertical=False, minSegmentLength=minSegmentLength)
 				# backward pass
-				referenceImage((row1, col1), slope, intersections, lines, image, snapThreshold, forward=False, vertical=False)
+				referenceImage((row1, col1), slope, intersections, lines, image, snapThreshold, forward=False, vertical=False, minSegmentLength=minSegmentLength)
 			else:
 				# vertical line, slope doesn't matter
-				referenceImage((row1, col1), -1, intersections, lines, image, snapThreshold, forward=True, vertical=True)
+				referenceImage((row1, col1), -1, intersections, lines, image, snapThreshold, forward=True, vertical=True, minSegmentLength=minSegmentLength)
 	#print(lines)
 	print('intersections',intersections)
 	# add the corners to lines to create a square
@@ -450,6 +442,7 @@ def determineBounds(image, degreesToRho, grid=0, startingAngle=0):
 	lines[(corners[2], corners[3])] = 1
 	# bottom edge
 	lines[(corners[1], corners[3])] = 1
+	sys.stdout.write("]\n") # this ends the progress bar
 	return lines
 '''
 Code is repeated three times
@@ -457,7 +450,7 @@ Code is repeated three times
 2 backward iteration from start ppint
 3 vertical line edge case to handle no change in column
 '''
-def referenceImage(start, slope, intersections, lines, image, snapThreshold, forward=True, vertical=False):
+def referenceImage(start, slope, intersections, lines, image, snapThreshold, forward=True, vertical=False, grid=0, minSegmentLength=10):
 	'''
 	In this step, we take the lines we calculated in parseImage, and attempt to create a crease pattern by referecing the original image.
 	The lines we receive in parseImage have no endpoints, so we must figure out the endpoints in this step.
@@ -470,12 +463,13 @@ def referenceImage(start, slope, intersections, lines, image, snapThreshold, for
 	'''
 	RED = (0,0,255)# Red = (0, 0, 255)
 	BLUE = (255,0,0)# Blue = (255, 0, 0)
-	minSegmentLength = 20
+	
 	colorThreshold = 60 # totally arbitary, not sure how this will play out for shorter line segments
 	rows,cols,channels = image.shape
+	
 	row1,col1 = start
 	blank = np.zeros(image.shape)
-	print('slope', slope)
+	#print('slope', slope)
 	startRow, startCol = start = getStart((row1,col1), slope, rows-1, vertical=vertical)
 
 	offset = (startRow + slope, startCol + 1)
@@ -484,8 +478,8 @@ def referenceImage(start, slope, intersections, lines, image, snapThreshold, for
 		offset = (startRow + 1, startCol)
 	snappedStart, snappedStartOffset = snap(start, offset, intersections, snapThreshold, start=True)
 	snappedRow, snappedCol = snappedStart
-	#snappedRow,snappedCol = startRow, startCol
-	print('start iteration',(snappedRow, snappedCol))
+
+	#print('start iteration',(snappedRow, snappedCol))
 
 	# loop is the same
 	# define loop bounds
@@ -493,15 +487,15 @@ def referenceImage(start, slope, intersections, lines, image, snapThreshold, for
 	if (vertical):
 		# vertical line
 		bounds = range(rows)
-		print ('vertical bounds', bounds)
+		#print ('vertical bounds', bounds)
 	elif(forward):
 		# forward iteration
 		bounds = range(cols-int(snappedCol))
-		print('forward pass bounds', bounds)
+		#print('forward pass bounds', bounds)
 	else:
 		# backward iteration
 		bounds = range(0,-int(snappedCol), -1)
-		print('backward pass bounds', bounds)
+		#print('backward pass bounds', bounds)
 	
 	# variables for line recreation state machine
 	startLineSegment = False
@@ -551,12 +545,12 @@ def referenceImage(start, slope, intersections, lines, image, snapThreshold, for
 		# it's possible we won't be able to continue occluded lines?
 		# maybe try to combine lines after the fact?
 		if not colorEquals(image[checkRowInt][checkColInt], (255,255,255)) and not startLineSegment:
-			print('start line at',checkRow, ',',checkCol,'with intensity', image[checkRowInt][checkColInt])
+			#print('start line at',checkRow, ',',checkCol,'with intensity', image[checkRowInt][checkColInt])
 			startLineSegment = True
 			# snap if this is close enough to an intersection
 			offset = (checkRow + slope, checkCol + 1)
 			startPoint, startOffset = snap((checkRow, checkCol), offset, intersections, snapThreshold)
-			print('start segment at', startPoint)
+			#print('start segment at', startPoint)
 			# keep track of the starting color
 			# assign start color as max of red or blue for checking later
 			startColor = image[checkRowInt][checkColInt]
@@ -606,18 +600,19 @@ def referenceImage(start, slope, intersections, lines, image, snapThreshold, for
 				# add all new intersections this line creates to the list of intersections
 				#addToIntersections(line, lines, intersections)
 				addToIntersections(line, lines.keys(), intersections)
-				print('end line', line)
+				#print('end line', line)
 				#showLine(line, blank.copy())
 				#blank = np.zeros(blank.shape)
 				#print(line)
 				#lines.append(line)
 				lines[line] = lineType
 			else:
-				print('line found is too short')
+				pass
+				#print('line found is too short')
 
 	if (startLineSegment):
 		startLineSegment = False
-		print('need to finish line segment')
+		#print('need to finish line segment')
 		# finish unfinished line segments
 		endPoint, endOffset = snap((finalRow, finalCol), startPoint,intersections, snapThreshold)
 		line = (startPoint, endPoint)
@@ -641,49 +636,18 @@ def referenceImage(start, slope, intersections, lines, image, snapThreshold, for
 			lineType = getLineType(startColor)
 			# add all new intersections this line creates to the list of intersections
 			addToIntersections(line, lines.keys(), intersections)
-			print('end line', line)
+			#print('end line', line)
 			#showLine(line, blank.copy())
 			#blank = np.zeros(blank.shape)
 			#print(line)
 			#lines.append(line)
 			lines[line] = lineType
 		else:
-			print('line found is too short')
+			pass
+			#print('line found is too short')
 
 
-'''
-Helper debugging displays
-'''
-def showLine(line,image):
-	c1,r1 = line[0]
-	c2,r2 = line[1]
-	
-	cv2.line(image,(int(r1), int(c1)),(int(r2), int(c2)),(255,255,255),10)
-	image = cv2.resize(image, (400,400))
-	showImage(image,'line added')
-	#image = np.zeros(image.shape)
-def highlightPoint(point,image):
-	drawImage = image.copy()
-	cv2.circle(drawImage, point, 100, (0,255,0))
-	drawImage = cv2.resize(drawImage, (400,400))
-	showImage(drawImage,'highlight')
-'''
-Check if two colors are equal by checking each channel individually
-Only used because tuple and numpy channel array are slightly different
-'''
-def colorEquals(color, target):
-	return color[0] == target[0] and color[1] == target[1] and color[2] == target[2]
 
-def getLineType(color):
-	# return 1 for none
-	# return 2 for mountain
-	# return 3 for valley
-	if (color[0] > color[1] and color[0] > color[2]):
-		return 3
-	elif (color[2] > color[0] and color[2] > color[1]):
-		return 2
-	else:
-		return 1
 
 '''
 Snap a point to an existing intersection if it is close enough, essentially, move a line to include an existing intersection if it is wthin a certain threshold
@@ -707,20 +671,20 @@ def snap(point, offset, intersections, snapThreshold, start=False):
 	# that is the whole point of a forward and backward iteration
 	row,col = point
 	### also return the snap offset so we can offset the whole line?
-	print('find snap for point: ', point)
-	print('using offset:', offset)
+	#print('find snap for point: ', point)
+	#print('using offset:', offset)
 	# calculate the distance between every intersection and this line
 	distanceToIntersections = [round(distanceLineToPoint(point, offset, intersection),4) for intersection in intersections]
 	if (start):
 		# if this is a starting point, we only care about the closest point to the line
-		print('finding starting point, only check for proximity to line')
-		print(distanceToIntersections)
+		#print('finding starting point, only check for proximity to line')
+		#print(distanceToIntersections)
 		minDistance = min(distanceToIntersections)
 		# assume that ties mean the points are on the same line
 		if (minDistance < snapThreshold):
 			minIndex = distanceToIntersections.index(minDistance)
 			snapPoint = snapRow, snapCol = intersections[minIndex]
-			print('min distance', minDistance, ' to point', snapPoint)
+			#print('min distance', minDistance, ' to point', snapPoint)
 			return snapPoint, (snapRow-row, snapCol-col)
 		else:
 			return point, (0,0)
@@ -755,7 +719,7 @@ def snap(point, offset, intersections, snapThreshold, start=False):
 	
 	if minDistance < snapThreshold:
 		snapRow, snapCol = snapTo = intersections[minIndex]
-		print('snap to ', snapTo)
+		#print('snap to ', snapTo)
 		return intersections[minIndex], (snapRow-row, snapCol-col)
 	# elif (len(:
 	# 	#print('snap to ', intersections[minIndex])
@@ -763,169 +727,11 @@ def snap(point, offset, intersections, snapThreshold, start=False):
 	# 	return point
 	else:
 		# otherwise, return the point
-		print('no points near line')
+		#print('no points near line')
 		return point, (0,0)
 
-'''
-Distance from a point to a line
-https://en.wikipedia.org/wiki/Distance_from_a_point_to_a_line
 
-Arguments:
-	p1 (tuple) : (row,col) point on line
-	p1 (tuple) : (row,col) a different point on line
-	target (tuple) : (row,col) point to caluclate distance to
-Return:
-	distance : distance from point to the line
-'''
-def distanceLineToPoint(p1, p2 ,target):
-	x1,y1 = p1
-	x2,y2 = p2
-	x0,y0 = target
-	if (x1 == x2):
-		# horizontal line, travels along a row
-		# return y displacement (column difference)
-		#print('horizontal line')
-		return abs(x1 - x0)
-	if (y1 == y2):
-		# vertical line, travels along the same column
-		# return x displacement (row difference)
-		#print('vertical line')
-		return abs(y1 - y0)
-	#((x2 - x1) * (y1 - y0)) * ((x1 - x0) * (y2 - y1))
-	#numerator = abs((a * x) + (b * y) + c)
-	numerator = abs(((x2 - x1) * (y1 - y0)) - ((x1 - x0) * (y2 - y1)))
-	#denominator = math.sqrt((a*a) + (b*b))
-	denominator = distance(p1,p2)
-	return numerator/denominator
-'''
-Calculate the euclidean distance betwen two points
-Arguments:
-	point1 (tuple) : (row, col) point 1
-	point2 (tuple) : (row, col) point 2
-Returns:
-	distance (float) : distance between two points. 
-'''
-def distance(point1, point2):
-	return math.sqrt(sum([(x1 - x2)**2 for x1,x2 in zip(point1, point2)]))
-	#return math.sqrt( ((point1[0] - point2[0]) ** 2) + ((point1[1] - point2[1])**2) )
 
-'''
-Determine if two line segments intersect
-https://stackoverflow.com/questions/3838329/how-can-i-check-if-two-segments-intersect
-https://www.geeksforgeeks.org/check-if-two-given-line-segments-intersect/
-Arguments:
-	line1 : ((x1, y1), (x2, y2)), line segment 1
-	line2 : ((x1, y1), (x2, y2)), line segment 2
-Returns:
-	True if the line segments intersect, False otherwise
-
-'''
-def lineSegmentIntsersect(line1, line2):
-	p1,q1 = line1
-	p2,q2 = line2
-
-	# Find the 4 orientations required for  
-	# the general and special cases 
-	o1 = orientation(p1, q1, p2) 
-	o2 = orientation(p1, q1, q2) 
-	o3 = orientation(p2, q2, p1) 
-	o4 = orientation(p2, q2, q1) 
-	# General case 
-	if ((o1 != o2) and (o3 != o4)): 
-		#print(line1,'intersects with',line2)
-		return True
-	return False
-	# Special Cases 
-	# Ignore specials bases because we should never encounter parallel line, colinear lines
-
-	# # p1 , q1 and p2 are colinear and p2 lies on segment p1q1 
-	# if ((o1 == 0) and onSegment(p1, p2, q1)): 
-	# 	return True
-
-	# # p1 , q1 and q2 are colinear and q2 lies on segment p1q1 
-	# if ((o2 == 0) and onSegment(p1, q2, q1)): 
-	# 	return True
-
-	# # p2 , q2 and p1 are colinear and p1 lies on segment p2q2 
-	# if ((o3 == 0) and onSegment(p2, p1, q2)): 
-	# 	return True
-
-	# # p2 , q2 and q1 are colinear and q1 lies on segment p2q2 
-	# if ((o4 == 0) and onSegment(p2, q1, q2)): 
-	# 	return True
-
-	# # If none of the cases 
-	# return False
-def onSegment(p,q,r):
-	px,py = p
-	qx,qy = q
-	rx,ry = r
-	return qx <= max(px, rx) and qx >= min(px, rx) and qy <= max(py, ry) and qy >= min(py, ry)
-
-def orientation(p,q,r):
-	# 0, colinear, slopes are the same
-	# 1 clockwise points
-	# 2 counter clockwise
-	px,py = p
-	qx,qy = q
-	rx,ry = r
-	value = (float(qy-py) * (rx-qx)) - (float(qx-px) * (ry-qy)) 
-	if (value > 0):
-		return 1
-	elif (value < 0):
-		return 2
-	else:
-		return 0
-def addToIntersections(newLine, lines, intersections, rejectThreshold=10):
-	print('registering intersections for',newLine)
-	# add line endpoints as possible intersections for future lines
-	# the nature of adding lines in a weird order means that they will be future intersections
-	# assuming the model is flat foldable an the lines are inside the square
-
-	# need to reject points that are very close to an existing intersection
-	if (newLine[0] not in intersections):
-		intersections.append(newLine[0])
-	if (newLine[1] not in intersections):
-		intersections.append(newLine[1])
-	for line in lines:
-		#print('check line', line)
-		if lineSegmentIntsersect(newLine, line):
-
-			intersection = findLineSegmentIntersect(newLine, line)
-			print(newLine, 'intersects with', line, 'at', intersection)
-			if min([distance(intersection, checkIntersection) for checkIntersection in intersections]) > rejectThreshold:
-			#if (intersection not in intersections):
-				intersections.append(intersection)
-
-'''
-Find the intersection between two line segments
-Assumes they intersect but that might be redundant, can likely be optimized
-
-Arguments:
-	line1 (tuple) : ((x1,y1), (x2,y2)) line segment 1
-	line2 (tuple) : ((x1,y1), (x2,y2)) line segment 2
-Returns:
-	intersecction (tuple) : (x,y) intersection point
-	Can also raise Exception but this should never happen in its current use cases
-'''
-def findLineSegmentIntersect(line1, line2):
-	#https://stackoverflow.com/questions/20677795/how-do-i-compute-the-intersection-point-of-two-lines
-	#print(line1)
-	#print(line2)
-	xdiff = (line1[0][0] - line1[1][0], line2[0][0] - line2[1][0])
-	ydiff = (line1[0][1] - line1[1][1], line2[0][1] - line2[1][1])
-
-	def det(a, b):
-		return a[0] * b[1] - a[1] * b[0]
-
-	div = det(xdiff, ydiff)
-	if div == 0:
-		raise Exception('lines do not intersect')
-
-	d = (det(*line1), det(*line2))
-	x = det(d, xdiff) / div
-	y = det(d, ydiff) / div
-	return x, y
 
 '''
 Find the leftmost intersection between this line and the square
@@ -940,7 +746,7 @@ Return:
 def getStart(point, slope, length, vertical=False):
 	# slope = change in row/change in column
 	row,col = point
-	print('finding start for', point)
+	#print('finding start for', point)
 	if (vertical):
 		# this is a vertical line, return the column intersection with row 0
 		return (0, col)
@@ -959,7 +765,7 @@ def getStart(point, slope, length, vertical=False):
 
 		# conceptually, -1 will either swap col in the case the col < 0 or swap slope inthe case that col > 0
 		leftRow = (col * slope * -1) + row
-		print('left row', leftRow)
+		#print('left row', leftRow)
 		# leeway should be taken care of by snap
 		#if (distance())
 		if (-10 <= leftRow <= length+10):
@@ -974,42 +780,48 @@ def getStart(point, slope, length, vertical=False):
 
 
 '''
-Write a .cp file with a given list of lines
+Crop the square crease pattern out of an image
 
 Arguments:
-	pathToCP (str) : path to the cp file
-	lines (list) : list of lines, output from determineBounds
+	image (image as numpy array) : image to crop a square creaes pattern out of
 Returns:
-	No return but will create a file at path of pathToCP in the .cp file format
+	square (image as numpy array) : square image of numpy array
 '''
-def writeCP(pathToCP, lines):
-	print('\nwriting to ', pathToCP)
-	with open(pathToCP, 'w+') as f:
-		for line in lines:
-			cpLine = str(lines[line]) + ' ' + str(line[0][0]) + ' ' + str(line[0][1]) + ' ' + str(line[1][0]) + ' ' + str(line[1][1])			
-			print(cpLine)
-			f.write(cpLine)
-			f.write('\n')
+def cropSquare(image):
+	rows,cols, channels = image.shape
+	# find top left corner
+	left = -1
+	top = -1
+	for row in range(rows):
+		for col in range(cols):
+			if sum(image[row][col]) < 220*3:
+			#if not colorEquals((255,255,255), image[row][col]):
+				top = row
+				left = col
+				break
+	right = -1
+	bottom = -1
+	for row in range(rows-1,-1,-1):
+		for col in range(cols-1,-1,-1):
+			#if not colorEquals((255,255,255), image[row][col]):
+			if sum(image[row][col]) < 220*3:
+				bottom = row
+				right = col
+				break
+	print('length', (right-left))
+	print('height', (top-bottom))
+	return image[bottom:top, left:right]
 
-'''
-Helper function to show and destroy images
 
-Arguments:
-	image (image as numpy array) : image to display
-	title (str) : title of display window
-Returns:
-	None
-'''
-def showImage(image, title):
-	cv2.imshow(title, image)
-	cv2.waitKey(0)
-	cv2.destroyAllWindows()
+
+
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser(description='Choose an input image')
 	parser.add_argument('pathToImage', type=str, help='path to image of crease pattern')
 	parser.add_argument('-t','--pathToThinned', type=str, default='', help='path to thinned line image, if no path is specified, theline thinnng algorithm will run on the provided image')
 	parser.add_argument('-g', '--grid', type=int, default=0, help='grid size of crease pattern, this will help in getting accurate points')
-	parser.add_argument('-a', '--angle', type=float, default = 0, help='starting angle of crease pattern (try 22.5)')
+	parser.add_argument('-a', '--angle', type=float, default = 0, help='starting angle in degrees of crease pattern (try 22.5)')
+	parser.add_argument('-sa', '--stepAngle', type=float, default=5.625, help='minimum angle in degrees between any two line segments. Selecting the largest possible step size will reduce the runtime')
 	args = parser.parse_args()
 
 	main(args)
