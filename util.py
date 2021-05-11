@@ -7,6 +7,10 @@ import sys
 import time
 import random
 
+BLUE = (255,0,0)
+RED = (0,0,255)
+WHITE = (255,255,255)
+BLACK = (0,0,0)
 '''
 Get the eight neighbors of a pixel in the order specified by the Zhange-Suen line thinning algorithm
 
@@ -127,17 +131,21 @@ def thinLines(image):
 '''
 Helper debugging displays
 '''
-def showLine(line,image):
+def showLine(line,image, lineType=1):
 	c1,r1 = line[0]
 	c2,r2 = line[1]
-	
-	cv2.line(image,(int(r1), int(c1)),(int(r2), int(c2)),(255,255,255),10)
+	lineColor = WHITE
+	if lineType==2:
+		lineColor = RED
+	if lineType==3:
+		lineColor = BLUE
+	cv2.line(image,(int(r1), int(c1)),(int(r2), int(c2)),lineColor,5)
 	image = cv2.resize(image, (400,400))
 	showImage(image,'line added')
 	#image = np.zeros(image.shape)
 def highlightPoint(point,image):
 	drawImage = image.copy()
-	cv2.circle(drawImage, point, 100, (0,255,0))
+	cv2.circle(drawImage, point, 20, (0,255,0))
 	drawImage = cv2.resize(drawImage, (400,400))
 	showImage(drawImage,'highlight')
 '''
@@ -147,6 +155,9 @@ Only used because tuple and numpy channel array are slightly different
 def colorEquals(color, target):
 	return color[0] == target[0] and color[1] == target[1] and color[2] == target[2]
 
+'''
+Maybe can change to checking RED and BLUE and BLACK instead?
+'''
 def getLineType(color):
 	# return 1 for none
 	# return 2 for mountain
@@ -182,8 +193,12 @@ Arguments:
 Returns:
 	None
 '''
-def showImage(image, title):
-	cv2.imshow(title, image)
+def showImage(image, title='image', scale=False):
+	if scale:
+		copy = cv2.resize(image,(750,750))
+		cv2.imshow(title, copy)
+	else:
+		cv2.imshow(title, image)
 	cv2.waitKey(0)
 	cv2.destroyAllWindows()
 
@@ -198,16 +213,35 @@ Arguments:
 Returns:
 	No return but will create a file at path of pathToCP in the .cp file format
 '''
-def writeCP(pathToCP, lines):
+def writeCP(pathToCP, lines, show=False):
 	print('\nwriting to ', pathToCP)
+
 	with open(pathToCP, 'w+') as f:
 		for line in lines:
+			#print(line)
 			cpLine = str(lines[line]) + ' ' + str(line[0][0]) + ' ' + str(line[0][1]) + ' ' + str(line[1][0]) + ' ' + str(line[1][1])			
 			print(cpLine)
 			f.write(cpLine)
 			f.write('\n')
+	if (show):
+		# find the bounds
+		# probably only need to check the max, min should always be zero
+		minVal, maxVal = 99999, -1
 
-
+		for line in lines:
+			checkMin = min(line[0][0], line[0][1], line[1][0], line[1][1])
+			checkMax = max(line[0][0], line[0][1], line[1][0], line[1][1])
+			if (checkMin < minVal):
+				minVal = checkMin
+			if (checkMax > maxVal):
+				maxVal = checkMax
+		# create a square to draw lines on
+		maxVal = int(maxVal)
+		square = np.zeros((maxVal, maxVal))
+		print(square.shape)
+		for line in lines:
+			cv2.line(square,(int(line[0][0]), int(line[0][1])),(int(line[1][0]), int(line[1][1])),(255,255,255),2)
+		showImage(square)
 '''
 Determine if two line segments intersect
 https://stackoverflow.com/questions/3838329/how-can-i-check-if-two-segments-intersect
@@ -366,3 +400,87 @@ Use OS to create a path agnostic of OS
 def createPath(path):
 
 	pass
+
+
+# thinninning lines then expanding to create 3 pixel lines > just using the lines?
+# let's revist to preserve lines 
+# like FB summer 2021 coding interview
+# this currently takes a long time, maybe can optimize later
+def expand(image):
+	#pass
+	# editSet = []
+	# for row in image:
+	# 	for pixel in row:
+	# 		if ()
+	rows, cols, channels = image.shape
+	retImage = np.zeros(image.shape)
+	neighborAccess = [(1,0), (1,1), (0,1), (-1,1), (-1,0), (-1,-1), (0,-1), (0,1), (1,0), (1,1), (0,1), (-1,1), (-1,0), (-1,-1), (0,-1), (0,1)]
+	for r, row in enumerate(image):
+		if (r == 0 or r == rows-1):
+			continue
+		for c, pixel in enumerate(row):
+			if (c == 0 or c == cols-1):
+				continue
+			if (colorEquals(pixel, WHITE)):
+				# only need to edit white pixels
+				# determine the most populous neighbor
+				redCount = 0
+				blueCount = 0
+				for add in neighborAccess:
+					if colorEquals(image[r + add[0]][c + add[1]], RED):
+						redCount+=1
+					elif colorEquals(image[r + add[0]][c + add[1]], BLUE):
+						blueCount+=1
+				if (redCount >= blueCount and redCount > 0):
+					# arbitrarily set a pixel to red if it is a tie
+					retImage[r][c] = RED
+				elif blueCount > 0:
+					retImage[r][c] = BLUE
+				else:
+					retImage[r][c] = image[r][c]
+			else:
+				# keep black, blue, and red pixels
+				retImage[r][c] = image[r][c]
+	showImage(retImage, title='expand')
+	return retImage
+
+def checkNeighbor(row, col, image):
+	pass
+	# checkSet = 
+	# if (row == 0):
+
+'''
+set all pixels to
+black (0,0,0)
+white(255,255,255)
+red (0,0,255)
+blue(255,0,0)
+
+Look at pixel value and maybe neighbors
+'''	
+def deblur(image):
+	colors = [
+	[0,0,0],
+	[255,255,255],
+	[0,0,255],
+	[255,0,0]
+	]
+	for r, row in enumerate(image):
+		for c, pixel in enumerate(row):
+			# determine the closest color
+			bestMatch = colors[0]
+			minDistance = 99999
+			if (colorEquals(pixel, colors[0]) or colorEquals(pixel, colors[1]) or colorEquals(pixel, colors[2]) or colorEquals(pixel, colors[3])):
+				# skip if this pixel is already one of the acceptable colors
+				continue
+			for color in colors:
+				if (distance(color, pixel) < minDistance):
+					minDistance = distance(color, pixel)
+					bestMatch = color
+			# set the pixel to that color
+			image[r][c] = bestMatch
+	#print(image.shape)
+	#showImage(image)
+
+	# should be modifying in place but need to return for the way I called it?
+	return image
