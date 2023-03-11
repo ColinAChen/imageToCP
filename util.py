@@ -7,6 +7,8 @@ import sys
 import time
 import random
 
+SUPRESS = True
+
 BLUE = (255,0,0)
 RED = (0,0,255)
 WHITE = (255,255,255)
@@ -194,6 +196,8 @@ Returns:
 	None
 '''
 def showImage(image, title='image', scale=False):
+	if SUPRESS:
+		return
 	if scale:
 		copy = cv2.resize(image,(750,750))
 		cv2.imshow(title, copy)
@@ -309,17 +313,35 @@ def orientation(p,q,r):
 		return 2
 	else:
 		return 0
-def addToIntersections(newLine, lines, intersections, rejectThreshold=10):
-	#print('registering intersections for',newLine)
+
+'''
+newLine (float start row, float start col) : new line to check for intersections with existing lines
+lines {(float start row, float start col) : lineType, ....} : dict of existing lines, assume they are intersection free (form a planar graph) with associated lineType
+intersections set{(float intersect row, float intersect col)} : set of intersections, use to check if there is nearby intersection so the new intersection shouldn't be registered
+lineType (int 1,2, or 3) : line type of the newLine, used to create new lines that meet at the intersection
+rejectThreshold (number) : distance to an existing intersection to which a new intersection should not be added to the set of intersections
+'''
+def addToIntersections(newLine, lines, intersections, lineType, rejectThreshold=10):
+	print('registering intersections for',newLine)
 	# add line endpoints as possible intersections for future lines
 	# the nature of adding lines in a weird order means that they will be future intersections
-	# assuming the model is flat foldable an the lines are inside the square
+	# assuming the model is flat foldable and the lines are inside the square
+
+
+	# we need to create new lines that all meet at the intersection
 
 	# need to reject points that are very close to an existing intersection
 	if (newLine[0] not in intersections):
 		intersections.append(newLine[0])
 	if (newLine[1] not in intersections):
 		intersections.append(newLine[1])
+	addLines = []
+	removeLines = []
+	recheckList = []
+	# check each line
+	# if there is an intersection
+	# check whether or not to add this intersection to the set
+	# recrate lines that meet at the intersection, we will need to check the new segments for intersections as well
 	for line in lines:
 		#print('check line', line)
 		if lineSegmentIntsersect(newLine, line):
@@ -329,6 +351,20 @@ def addToIntersections(newLine, lines, intersections, rejectThreshold=10):
 			if intersection is not None and min([distance(intersection, checkIntersection) for checkIntersection in intersections]) > rejectThreshold:
 			#if (intersection not in intersections):
 				intersections.append(intersection)
+
+			# create new lines that meet at the intersection
+			newLine1 = (newLine[0], intersection)
+			newLine2 = (intersection, newLine[1])
+			newLine3 = (line[0], intersection)
+			newLine4 = (intersection, line[1])
+			checkNewLines = (newLine1, newLine2, newLine3, newLine4)
+			for checkLine in checkNewLines:
+				# ensure that each line is long enough
+				# arbitrary, might want to base this off of the image size later
+				if (distance(checkLine[0], checkLine[1]) > 5):
+					addLine = (checkLine, lineType)
+					addLines.append(addLines)
+
 
 '''
 Find the intersection between two line segments
@@ -403,7 +439,7 @@ def createPath(path):
 
 
 # thinninning lines then expanding to create 3 pixel lines > just using the lines?
-# let's revist to preserve lines 
+# let's revist to preserve lines, EDIT this is probably unecessary, I think the current paradigm is sufficient
 # like FB summer 2021 coding interview
 # this currently takes a long time, maybe can optimize later
 def expand(image):
@@ -484,3 +520,74 @@ def deblur(image):
 
 	# should be modifying in place but need to return for the way I called it?
 	return image
+
+'''
+dfsLines, use depth first search to approximate line starts and slopes, use this an alternative to hough line transform
+
+Arguments: 
+	image (image as numpy array) : copy of binary grayscale, line thinned image of crease. Idealy, lines will have at thickness of 1 pixel
+
+Returns: 
+	List of line endppoints
+'''
+def dfsLines(image):
+	'''
+	for pixel in image:
+
+		if (pixel is black (on a line)):
+			add pixel to stack
+			dfsHelper(on black neighbors, these should all be unique lines themselves) -> last pixel in this line
+			set pixel to white as we go
+			add start, end to list
+			return list of points
+		
+
+	'''
+	visitedSet = set()
+	queue = []
+	# explore every pixel
+	for row, imageRow in enumerate(image):
+		for col, pixel in enumerate(imageRow):
+			# start searching once we find a 
+			if pixel == WHTIE:
+				pass
+def dfsRecursiveHelper(row, col, image):
+	pass
+
+
+
+'''
+find the intersections in a crease pattern to create a complete point set
+
+Arguments
+	image (numpy array as image) : image of crease pattern, preferably cropped
+
+Returns
+	intersections [(float, float)] : list of intersection points
+'''
+def findIntersections(image):
+	'''
+	Some ideas to try
+	sliding window, intersections should have more color than non intersections
+	'''
+	# sliding window can be based on image size, hardcode for now
+	windowSize = 5
+
+	# pad the image to include corners
+	gray = image
+	if len(image[0][0]) > 1:
+		gray = cv2.cvtColor(image, cv2.COLOR_BGRTOGRAY)
+	# set lines to white and lines to black
+	# for now assume that lines are black and background is white
+	# we can detect this later, but probably should detect this upstream instead
+	gray = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
+	showImage(gray)
+
+	# high conv score means more lines
+	# threshold so all lines types contribute equally
+	
+	rows, cols = gray.shape
+	conv = np.zeros((rows + (2*windowSize), cols + (2*windowSize)))
+
+
+

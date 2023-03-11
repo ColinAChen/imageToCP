@@ -10,6 +10,16 @@ Add input for minimum number of votes/min segment instead of trying to automate 
 
 Add input for valley/mountain type
 '''
+
+'''
+3/11/2023
+use plant's idea of detecting verticies first to create a point set
+Robert Lang's reference finder is designed with human level precision in mind
+I wanted to get better precision than that, perhaps the new approach will lend better results
+but this appraoch should be able to get something
+We should be able to plug and play after that
+
+'''
 def main(args):
 	#print(args)
 	#print(args.pathToImage)
@@ -135,6 +145,8 @@ def parseImage(image, pathToImage='',pathToThinned='',needThinLines=False, stepA
 	#showImage(grayscale, 'fish_thinned')
 	# perform line detection
 	edges = cv2.Canny(grayscale, 50, 150, apertureSize=3)
+
+	showImage(edges, 'edges')
 	#print(edges.shape)
 	showImage(edges, 'edges', scale=True)
 	#print(edges)
@@ -275,31 +287,6 @@ def parseImage(image, pathToImage='',pathToThinned='',needThinLines=False, stepA
 	#return lines
 
 
-'''
-dfsLines, use depth first search to approximate line starts and slopes, use this an alternative to hough line transform
-
-Arguments: 
-	image (image as numpy array) : copy of binary grayscale, line thinned image of crease. Idealy, lines will have at thickness of 1 pixel
-
-Returns: 
-	List of line endppoints
-'''
-def dfsLines(image):
-	'''
-	for pixel in image:
-
-		if (pixel is black (on a line)):
-			add pixel to stack
-			dfsHelper(on black neighbors, these should all be unique lines themselves) -> last pixel in this line
-			set pixel to white as we go
-			add start, end to list
-			return list of points
-		
-
-	'''
-	pass
-def dfsRecursiveHelper(row, col, image):
-	pass
 
 
 
@@ -404,6 +391,25 @@ def determineBounds(image, degreesToRho, grid=0, startingAngle=0):
 	#sys.stdout.flush()
 
 	#sys.stdout.write("\b" * (18))
+
+
+
+	# this will create duplicated segments if any points end on the edges, need to revist this
+	# find all the lines that touch the edges/corners
+	# add these lines first so that as we add lines
+	# we can reconstruct them as we find intersections
+
+	# add the corners to lines to create a square
+	# top edge
+	lines[(corners[0], corners[1])] = 1
+	# left edge
+	lines[(corners[0], corners[2])] = 1
+	# right edge
+	lines[(corners[2], corners[3])] = 1
+	# bottom edge
+	lines[(corners[1], corners[3])] = 1
+
+
 	for angle in degreesToRho:
 		#sys.stdout.write("%d/%d" % (completedAngles, len(degreesToRho)))
 		#sys.stdout.flush()
@@ -499,23 +505,13 @@ def determineBounds(image, degreesToRho, grid=0, startingAngle=0):
 	#print(lines)
 	#print('intersections',intersections)
 
-	# this will create duplicated segments if any points end on the edges, need to revist this
 
-	# add the corners to lines to create a square
-	# top edge
-	lines[(corners[0], corners[1])] = 1
-	# left edge
-	lines[(corners[0], corners[2])] = 1
-	# right edge
-	lines[(corners[2], corners[3])] = 1
-	# bottom edge
-	lines[(corners[1], corners[3])] = 1
 	#sys.stdout.write("]\n") # this ends the progress bar
 	return lines
 '''
 Code is repeated three times
 1 forward iteration from start point
-2 backward iteration from start ppint
+2 backward iteration from start point
 3 vertical line edge case to handle no change in column
 '''
 def referenceImage(start, slope, intersections, lines, image, snapThreshold, forward=True, vertical=False, grid=0, minSegmentLength=10):
@@ -677,7 +673,7 @@ def referenceImage(start, slope, intersections, lines, image, snapThreshold, for
 				lineType = getLineType(startColor)
 				# add all new intersections this line creates to the list of intersections
 				#addToIntersections(line, lines, intersections)
-				addToIntersections(line, lines.keys(), intersections)
+				addToIntersections(line, lines, intersections, lineType)
 				
 
 				print('end line', line)
@@ -695,7 +691,7 @@ def referenceImage(start, slope, intersections, lines, image, snapThreshold, for
 				#print('line found is too short')
 
 	if (startLineSegment):
-		print('ending line out of bounds ', checkRowInt, checkColInt, ' with color ', image[checkRowInt][checkColInt])
+		#print('ending line out of bounds ', checkRowInt, checkColInt, ' with color ', image[checkRowInt][checkColInt])
 		startLineSegment = False
 		#print('need to finish line segment')
 		# finish unfinished line segments
@@ -720,7 +716,7 @@ def referenceImage(start, slope, intersections, lines, image, snapThreshold, for
 			# 	lineType = 3
 			lineType = getLineType(startColor)
 			# add all new intersections this line creates to the list of intersections
-			addToIntersections(line, lines.keys(), intersections)
+			addToIntersections(line, lines, intersections, lineType)
 			
 
 			print('end line', line)
@@ -752,10 +748,10 @@ Return:
 
 '''
 def snap(point, offset, intersections, snapThreshold, start=False):
-	print('find snap point for ', point, ' using snapThreshold ', snapThreshold)
+	print('\nfind snap point for ', point, ' using snapThreshold ', snapThreshold)
 	### POSSIBLE IMPROVEMENTS?
 	# Snap towards edges
-	# Snap towrds lines that don't already intersect?
+	# Snap towards lines that don't already intersect?
 	# Utilize returned offset to snap both ends? not sure how much this matters since fish base collapsed okay
 	# start point should have different rules, I only care about points close to the line, I don't care about distnace to acutal points
 	# that is the whole point of a forward and backward iteration
