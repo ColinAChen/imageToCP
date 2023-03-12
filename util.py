@@ -7,7 +7,7 @@ import sys
 import time
 import random
 
-SUPRESS = True
+SUPRESS = False
 
 BLUE = (255,0,0)
 RED = (0,0,255)
@@ -566,21 +566,65 @@ Returns
 	intersections [(float, float)] : list of intersection points
 '''
 def findIntersections(image):
+	image = cv2.resize(image ,(250,250))
+
+	showImage(image)
 	'''
 	Some ideas to try
 	sliding window, intersections should have more color than non intersections
+
+	Do the line verification process twice
+	First time will be to establish point set
+		Run each line in both directions, when it changes color, each line votes to put a point in the point set
+		Average nearby votes to a single point
+		This is better than trying to establish a point set from the beginning
+	Second time will be to snap lines to points in the point set
+
+	Use image pyramid, downsample make sure to keep unique features
+	Upsample then snap to point set
 	'''
 	# sliding window can be based on image size, hardcode for now
-	windowSize = 5
 
-	# pad the image to include corners
+	# might be able to downsample then up
+
+
+
+	windowSize = 10
 	gray = image
-	if len(image[0][0]) > 1:
-		gray = cv2.cvtColor(image, cv2.COLOR_BGRTOGRAY)
+	if len(gray[0][0]) > 1:
+		gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+	#showImage(gray)
 	# set lines to white and lines to black
 	# for now assume that lines are black and background is white
 	# we can detect this later, but probably should detect this upstream instead
-	gray = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
+	if np.mean(gray) < 127:
+		print('background is black')
+		ret,gray = cv2.threshold(gray, 10, 255, cv2.THRESH_BINARY)
+	else:
+
+		ret,gray = cv2.threshold(gray, 10, 255, cv2.THRESH_BINARY)
+	showImage(gray)
+	rows, cols = gray.shape
+	conv = np.zeros((rows + (2*windowSize), cols + (2*windowSize)))
+	conv [windowSize:rows+windowSize, windowSize: cols+windowSize] = gray
+
+	'''
+	
+
+	# pad the image to include corners
+	gray = image
+	if len(gray[0][0]) > 1:
+		gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+	showImage(gray)
+	# set lines to white and lines to black
+	# for now assume that lines are black and background is white
+	# we can detect this later, but probably should detect this upstream instead
+	if np.mean(gray) < 127:
+		print('background is black')
+		ret,gray = cv2.threshold(gray, 10, 255, cv2.THRESH_BINARY)
+	else:
+
+		ret,gray = cv2.threshold(gray, 10, 255, cv2.THRESH_BINARY)
 	showImage(gray)
 
 	# high conv score means more lines
@@ -588,6 +632,50 @@ def findIntersections(image):
 	
 	rows, cols = gray.shape
 	conv = np.zeros((rows + (2*windowSize), cols + (2*windowSize)))
+	conv [windowSize:rows+windowSize, windowSize: cols+windowSize] = gray
+	out = np.zeros(gray.shape)
+	for r in range(rows):
+		for c in range(cols):
+			val = np.mean(conv[r:r+windowSize, c:c+windowSize])
+			if val > 127:
+				#print('r:',r,'c:',c,'val:',val)
+			out[r][c] = val/255
 
 
+	# find local maximums
+	# probably better to find clusters
+	#showImage(conv)
+	showImage(out)
+	'''
+
+
+	#filename = 'chessboard2.jpg'
+	#img = cv2.imread(filename)
+	#gray = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
+	# find Harris corners
+
+	
+	# gray = np.float32(conv)
+	# dst = cv2.cornerHarris(gray,7,5,0.04)
+	# dst = cv2.dilate(dst,None)
+	# ret, dst = cv2.threshold(dst,0.01*dst.max(),255,0)
+	# dst = np.uint8(dst)
+	# # find centroids
+	# ret, labels, stats, centroids = cv2.connectedComponentsWithStats(dst)
+	# # define the criteria to stop and refine the corners
+	# criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.001)
+	# corners = cv2.cornerSubPix(gray,np.float32(centroids),(5,5),(-1,-1),criteria)
+	# # Now draw them
+	# res = np.hstack((centroids,corners))
+	# res = np.int0(res)
+	# r,c = conv.shape
+
+	# out = np.zeros((r,c,3))
+	# for i in range(3):
+	# 	out[:,:,i] = conv
+	# out[res[:,1],res[:,0]]=[0,0,255]
+	# out[res[:,3],res[:,2]] = [0,255,0]
+
+	# showImage(out)
+#cv.imwrite('subpixel5.png',img)
 
