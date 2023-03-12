@@ -104,27 +104,9 @@ def parseImage(image, pathToImage='',pathToThinned='',needThinLines=False, stepA
 	showImage(image, 'received from main')
 	if (needThinLines):
 		image = cv2.resize(image, (500,500))
+		image = addImageBuffer(image)
 		showImage(image, title='resize')
-		rows, cols, channels = image.shape
-		color = BLACK
-		backgroundColor = WHITE
-		if np.mean(image) < 127:
-			# background is black
-
-			color = WHITE
-			backgroundColor = BLACK
-
-		image[:,0,:] = color
-		image[:,cols-1,:] = color
-		image[0,:,:] = color
-		image[rows-1,:,:] = color
 		
-		out = np.zeros((rows+(2*buf), cols+(2*buf), 3))
-		out[:,:,:] = backgroundColor
-		out[buf:rows+buf, buf:cols+buf,:] = image
-		#showImage(out)
-		image = out
-		image = np.uint8(image)
 
 		print('no thinned lines image provided, running line thinning algorithm')
 		grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -545,13 +527,19 @@ def determineBounds(image, degreesToRho, grid=0, startingAngle=0, pointSet=set()
 				minSegmentLength = int(min(rows,cols) / grid) - 1
 			minSegmentLength = 10
 			if not vertical:
+				# # forward pass
+				# referenceImage((row1, col1), slope, intersections, lines, image, snapThreshold, forward=True, vertical=False, minSegmentLength=minSegmentLength)
+				# # backward pass
+				# referenceImage((row1, col1), slope, intersections, lines, image, snapThreshold, forward=False, vertical=False, minSegmentLength=minSegmentLength)
 				# forward pass
-				referenceImage((row1, col1), slope, intersections, lines, image, snapThreshold, forward=True, vertical=False, minSegmentLength=minSegmentLength)
+				simpleReferenceImage((row1, col1), slope, intersections, lines, image, snapThreshold, forward=True, vertical=False, minSegmentLength=minSegmentLength)
 				# backward pass
-				referenceImage((row1, col1), slope, intersections, lines, image, snapThreshold, forward=False, vertical=False, minSegmentLength=minSegmentLength)
+				simpleReferenceImage((row1, col1), slope, intersections, lines, image, snapThreshold, forward=False, vertical=False, minSegmentLength=minSegmentLength)
+			
 			else:
 				# vertical line, slope doesn't matter
-				referenceImage((row1, col1), -1, intersections, lines, image, snapThreshold, forward=True, vertical=True, minSegmentLength=minSegmentLength)
+				#referenceImage((row1, col1), -1, intersections, lines, image, snapThreshold, forward=True, vertical=True, minSegmentLength=minSegmentLength)
+				simpleReferenceImage((row1, col1), -1, intersections, lines, image, snapThreshold, forward=True, vertical=True, minSegmentLength=minSegmentLength)
 	#print(lines)
 	#print('intersections',intersections)
 
@@ -856,12 +844,18 @@ def snap(point, offset, intersections, snapThreshold, start=False):
 
 '''
 Find the closest point in the point set
+This assumes that all intersections have been found ahead of time
 '''
-def simpleSnap(point, intersections):
-	distanceToIntersections = [round(distanceLineToPoint(point, offset, intersection),4) for intersection in intersections]
+def simpleSnap(point, intersections, threshold=50):
+	distanceToIntersections = [distance(point,x) for x in intersections]
+	#print(distanceToIntersections)
 	minDistance = min(distanceToIntersections)
+	#print(minDistance)
+	if minDistance > threshold:
+		return None
 	minIndex = distanceToIntersections.index(minDistance)
-	return intersection[point]
+	#print(minIndex)
+	return intersections[minIndex]
 
 '''
 Given a slope, find the start
@@ -873,26 +867,47 @@ Snap to the closest snap point
 
 Repeat until we reach the end of the line
 '''
-def simpleReferenceImage(start, slope, intersections, lines, image, forward=True, vertical=False, grid=0, minSegmentLength=10):
-	colorThreshold = 60 # totally arbitary, not sure how this will play out for shorter line segments
+def simpleReferenceImage(start, slope, intersections, lines, image, snapThreshold, forward=True, vertical=False, grid=0, minSegmentLength=10):
+
+	# add a buffer to the image
+	buf = 10
 	rows,cols,channels = image.shape
+	buff = addBuffer(image)
+	image = np.uint8(image)
+	colorThreshold = 300 # totally arbitary, not sure how this will play out for shorter line segments
+	
 	
 	row1,col1 = start
-	blank = np.zeros(image.shape)
 	#print('slope', slope)
+	print("intial start:", start)
+
+	# find the intersection with the leftmost point
 	startRow, startCol = start = getStart((row1,col1), slope, rows-1, vertical=vertical)
+	#highlightPoint((startRow, startCol),image, supress=False)
+	print('before',startRow, startCol)
+	startRow = int(startRow) + buf
+	startCol = int(startCol) + buf
+	highlightPoint((startRow, startCol),image, supress=False)
+	highlightPoint((startRow, startCol),buff, supress=False)
+	# start inside the square?
+	# use this to show which direction we are traveling?
+	# offset = (startRow + slope, startCol + 1)
+	# if (vertical):
+	# 	# no change in col as row changes
+	# 	offset = (startRow + 1, startCol)
+	'''
+	start at startRow and startCol
+	travel until we get to a line (decide by color), maybe sliding window later?
 
-	offset = (startRow + slope, startCol + 1)
-	if (vertical):
-		# no change in col as row changes
-		offset = (startRow + 1, startCol)
-	snappedStart, snappedStartOffset = snap(start, offset, intersections, snapThreshold, start=True)
-	snappedRow, snappedCol = snappedStart
+	when we hit a line, simple snap to the closest point
+	continue traveling along the original path which should be more accurate
+	when we hit the end of the line, snap to the closest point and add that line to the set
+	repeat
 
-	#print('start iteration',(snappedRow, snappedCol))
+	'''
+	first = None
+	currentColor = [0,0,0]
 
-	# loop is the same
-	# define loop bounds
 	bounds = range(1)
 	if (vertical):
 		# vertical line
@@ -900,172 +915,77 @@ def simpleReferenceImage(start, slope, intersections, lines, image, forward=True
 		#print ('vertical bounds', bounds)
 	elif(forward):
 		# forward iteration
-		bounds = range(cols-int(snappedCol))
+		bounds = range(cols-int(startCol))
 		#print('forward pass bounds', bounds)
 	else:
 		# backward iteration
-		bounds = range(0,-int(snappedCol), -1)
+		bounds = range(0,-int(startCol), -1)
 		#print('backward pass bounds', bounds)
-	
-	# variables for line recreation state machine
-	startLineSegment = False
-	startPoint = (-1,-1)
-	endPoint = (-1,-1)
-	# 
-	rollingAverageColor = [0,0,0] #currently getting rounded, not sure how that is affecting the accuracy
-	startColor = [0,0,0]
-	# consider changing to most populous color
-	# dict {color : frequency}
-	linePixels = 0
-	#print('forward range',cols-int(snappedCol))
-	#print('snapped col:',snappedCol)
-	#print('snapped row:', snappedRow)
-	#print('forward iteration')
-	finalRow, finalCol = (0,0)
-	snapStart = False # keep track of whether or not we snapped the starting point
+
+	print('slope:',slope)
+	print('start:',start)
+	print('bounds:',bounds)
+
 	for offset in bounds:
-		
-		checkRow = snappedRow + (slope*offset)
-		checkCol = snappedCol + offset
+		checkRow = startRow + (slope*offset)
+		checkCol = startCol + offset
 		# if not forward and not vertical:
 		# 	print(offset,(checkRow,checkCol))
 		if (vertical):
 			# handle the vertical line caes seperately
-			checkRow = offset
-			checkCol = snappedCol
-		# keep track of the last point we visit in case we have an unfinished line
+			checkRow = startRow
+			checkCol = startCol	
+
 		finalRow, finalCol = (checkRow, checkCol)
-		# round to access pixels in the original image
-		# one problem could be that lines are too thin and rounding takes it off a line?
 		checkRowInt = int(round(checkRow))
 		checkColInt = int(round(checkCol))
+
 		if (checkRowInt < 0 or checkRowInt >= rows or checkColInt < 0 or checkColInt >= cols):
 			#finalRow, finalCol = (checkRow, checkCol)
 			# protect image from referencing points out of bounds
 			#print('out of bounds, leaving iteration')
-			continue
-		# check if we are one a line
-		# might need to check neighbors, depending on how the row and column get rounded
-		# if intensity != white, we are on a line
-		# in the future, check the color
-		# if (checkRowInt == 500):
-		# 	print('row, col, intesity', checkRowInt, checkColInt, image[checkRowInt][checkColInt])
+			continue # not break because we might out of bounds
 
-		# a line segment ends if it is different than the previous color
-		# keep track of the starting color, end the semgment if the color is different
-		# it's possible we won't be able to continue occluded lines?
-		# maybe try to combine lines after the fact?
-		if not colorEquals(image[checkRowInt][checkColInt], (255,255,255)) and not startLineSegment:
-			#print('start line at',checkRow, ',',checkCol,'with intensity', image[checkRowInt][checkColInt])
-			startLineSegment = True
-			# snap if this is close enough to an intersection
-			offset = (checkRow + slope, checkCol + 1)
-			startPoint, startOffset = snap((checkRow, checkCol), offset, intersections, snapThreshold)
-			
-			# keep track of the starting color
-			# assign start color as max of red or blue for checking later
-			startColor = image[checkRowInt][checkColInt]
-			print('start segment at', startPoint, ' with color ', startColor)
-			# keep track of the color as a rolling average
-			# this will allow us to determine the color of lines even if they are occluded by differently colored lines
-			#rollingAverageColor = image[checkRowInt][checkColInt]
-			#linePixels = 1
+		# color has changed, current line has changed
+		# consider adding a buffer to the reference image and doing a sliding window, this could help detect different thickness lines
 
 
+		colorDist = distance(currentColor, image[checkRowInt][checkColInt])
+		if colorDist > colorThreshold:
 
-			highlightPoint((checkColInt,checkRowInt),image.copy())
+			print('color changed from ', currentColor,'to',image[checkRowInt][checkColInt], 'at',(checkRowInt, checkColInt))
+			# line has changed
+			if first is None:
 
-		# don't need to do anything along a line
-		elif not colorEquals(image[checkRowInt][checkColInt], startColor) and startLineSegment:
-			# we have started a line and just encountered a white pixel
-			# or another color line (could be a line intersection)
-			# this means the line we are on has finished
-			startLineSegment = False
+				# this is the first point in the line
+				first = simpleSnap((checkRow-buf, checkCol-buf), intersections)
+				print('start line segment at',first)
 
-			print('ending line at ', checkRowInt, checkColInt, ' with color ', image[checkRowInt][checkColInt])
-			# snap if this is close enough to an intersection
-			# check for intersections and update the list of intersections
-			endPoint, endOffset = snap((checkRow, checkCol), startPoint,intersections, snapThreshold)
-			line = (startPoint, endPoint)
-			print('determined line ', line)
-			if (distance(line[0], line[1]) > minSegmentLength):
-				# determine the line type
-				# opencv pixel intensities are returned as BlueGreenRed
-				# print('rollingAverageColor for line:',rollingAverageColor)
-				# lineType = 1
-				# if (distance(rollingAverageColor, RED) < colorThreshold):
-				# 	# red line indicates mountain fold
-				# 	# .cp -> mountain fold is 2
-				# 	print('mountain fold')
-				# 	lineType = 2
-				# elif (distance(rollingAverageColor, BLUE) < colorThreshold):
-				# 	# blue line indiciates valley fold
-				# 	# .cp -> valley fold is 3
-				# 	print('valley fold')
-				# 	lineType = 3
-				lineType = getLineType(startColor)
-				# add all new intersections this line creates to the list of intersections
-				#addToIntersections(line, lines, intersections)
-				addToIntersections(line, lines, intersections, lineType)
-				
-
-				print('end line', line)
-				showLine(line, blank.copy(), lineType=lineType)
-				
-
-				#blank = np.zeros(blank.shape)
-				#print(line)
-				#lines.append(line)
-				lines[line] = lineType
 			else:
-				print('line found is too short: ', distance(line[0], line[1]))
-				#print('startLineSegment: ', startLineSegment)
-				pass
-				#print('line found is too short')
+				# we have already found a point in the line
+				# for now assume that there will be a close snap point
+				# I'm not sure if this will always be true
+				second = simpleSnap((checkRow-buf, checkCol-buf), intersections,threshold=9999)
+				print('finish line segment at',second)
 
-	if (startLineSegment):
-		#print('ending line out of bounds ', checkRowInt, checkColInt, ' with color ', image[checkRowInt][checkColInt])
-		startLineSegment = False
-		#print('need to finish line segment')
-		# finish unfinished line segments
-		endPoint, endOffset = snap((finalRow, finalCol), startPoint,intersections, snapThreshold)
-		line = (startPoint, endPoint)
-		# endpoint might be off the square
+				# check if this line is long enough (use this to reject passing through points)
+				if distance(first, second) < minSegmentLength:
+					print("throw away segment of length", distance(first, second))
+					# this line is too short, throw away the current line segment
+					first = None
 
-		if (0<=line[1][0]<=rows-1 and 0<=line[1][1]<=rows-1 and distance(line[0], line[1]) > minSegmentLength):
-			# determine the line type
-			# opencv pixel intensities are returned as BlueGreenRed
-			#print('rollingAverageColor for line:',rollingAverageColor)
-			# lineType = 1
-			# if (distance(rollingAverageColor, RED) < colorThreshold):
-			# 	# red line indicates mountain fold
-			# 	# .cp -> mountain fold is 2
-			# 	print('mountain fold')
-			# 	lineType = 2
-			# elif (distance(rollingAverageColor, BLUE) < colorThreshold):
-			# 	# blue line indiciates valley fold
-			# 	# .cp -> valley fold is 3
-			# 	print('valley fold')
-			# 	lineType = 3
-			lineType = getLineType(startColor)
-			# add all new intersections this line creates to the list of intersections
-			addToIntersections(line, lines, intersections, lineType)
-			
+				# add this line to the set
+				lineType = getLineType(currentColor)
+				lines[(first,second)] = lineType
+				print("add line",(first,second),lineType)
+			highlightPoint((checkRowInt, checkColInt),image, supress=False)
+			currentColor = image[checkRowInt][checkColInt]
+			print("")
 
-			print('end line', line)
-			showLine(line, blank.copy(), lineType=getLineType)
-			
-
-			#blank = np.zeros(blank.shape)
-			#print(line)
-			#lines.append(line)
-			lines[line] = lineType
-		else:
-			pass
-			#print('line found is too short')
-
-
-
+	if first is not None:
+		# finish an incomplete line
+		# might be able to get around this with buffer and border
+		print("didn't finish line")
 
 
 
@@ -1150,8 +1070,29 @@ def cropSquare(image):
 	bounds = cv2.resize(bounds, (500,500))
 	return bounds#image[bottom:top, left:right]
 
+def addBuffer(image, buf=10):
+	rows, cols, channels = image.shape
+	color = BLACK
+	backgroundColor = WHITE
+	if np.mean(image) < 127:
+		# background is black
 
-
+		color = WHITE
+		backgroundColor = BLACK
+	temp = np.zeros(image.shape)
+	temp[:,:,:] = image
+	temp[:,0,:] = color
+	temp[:,cols-1,:] = color
+	temp[0,:,:] = color
+	temp[rows-1,:,:] = color
+	
+	out = np.zeros((rows+(2*buf), cols+(2*buf), 3))
+	out[:,:,:] = backgroundColor
+	out[buf:rows+buf, buf:cols+buf,:] = temp
+	#showImage(out)
+	temp = out
+	temp = np.uint8(temp)
+	return temp
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser(description='Choose an input image')

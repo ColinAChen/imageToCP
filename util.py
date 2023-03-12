@@ -7,7 +7,7 @@ import sys
 import time
 import random
 
-SUPRESS = False
+SUPRESS = True
 
 BLUE = (255,0,0)
 RED = (0,0,255)
@@ -145,11 +145,11 @@ def showLine(line,image, lineType=1):
 	image = cv2.resize(image, (400,400))
 	showImage(image,'line added')
 	#image = np.zeros(image.shape)
-def highlightPoint(point,image):
+def highlightPoint(point,image,supress=True):
 	drawImage = image.copy()
 	cv2.circle(drawImage, point, 20, (0,255,0))
 	drawImage = cv2.resize(drawImage, (400,400))
-	showImage(drawImage,'highlight')
+	showImage(drawImage,'highlight',supress=supress)
 '''
 Check if two colors are equal by checking each channel individually
 Only used because tuple and numpy channel array are slightly different
@@ -195,8 +195,8 @@ Arguments:
 Returns:
 	None
 '''
-def showImage(image, title='image', scale=False):
-	if SUPRESS:
+def showImage(image, title='image', scale=False, supress=SUPRESS):
+	if supress:
 		return
 	if scale:
 		copy = cv2.resize(image,(750,750))
@@ -219,10 +219,9 @@ Returns:
 '''
 def writeCP(pathToCP, lines, show=False):
 	print('\nwriting to ', pathToCP)
-
+	print(lines)
 	with open(pathToCP, 'w+') as f:
 		for line in lines:
-			#print(line)
 			cpLine = str(lines[line]) + ' ' + str(line[0][0]) + ' ' + str(line[0][1]) + ' ' + str(line[1][0]) + ' ' + str(line[1][1])			
 			print(cpLine)
 			f.write(cpLine)
