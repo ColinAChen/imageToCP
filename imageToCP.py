@@ -68,7 +68,9 @@ def main(args):
 		if os.path.isfile(args.pathToThinned):
 			# there is a file at pathToThinned, assume it is legit and use it to calculate lines
 			thinnedImage = cv2.imread(args.pathToThinned)
-			lines, pointSet = parseImage(thinnedImage,pathToImage=args.pathToImage, pathToThinned=args.pathToThinned,stepAngle=args.stepAngle, grid=args.grid)
+			#lines, pointSet = parseImage(thinnedImage,pathToImage=args.pathToImage, pathToThinned=args.pathToThinned,stepAngle=args.stepAngle, grid=args.grid)
+
+			lines, pointSet = parseImage(referenceImage,pathToImage=args.pathToImage, pathToThinned=args.pathToThinned,stepAngle=args.stepAngle, grid=args.grid)
 		else:
 			# no file was found so we must create one
 			lines, pointSet = parseImage(referenceImage, pathToThinned=args.pathToThinned, needThinLines=True, stepAngle=args.stepAngle, grid=args.grid)
@@ -79,6 +81,8 @@ def main(args):
 	
 	# convert the lines from parametric to cartesian coordinates and determine the bounds of each line
 	#finalLines = determineBounds(expand(deblur(referenceImage)), lines, grid=args.grid, startingAngle=args.angle, pointSet=pointSet)
+	referenceImage = addBuffer(referenceImage)
+	colorThreshold(referenceImage)
 	finalLines = determineBounds(referenceImage, lines, grid=args.grid, startingAngle=args.angle, pointSet=pointSet)
 
 	# write these lines to a cp file
@@ -101,6 +105,7 @@ def parseImage(image, pathToImage='',pathToThinned='',needThinLines=False, stepA
 	
 	#showImage(image)
 	buf = 10
+	image = addBuffer(image)
 	showImage(image, 'received from main')
 	if (needThinLines):
 		image = cv2.resize(image, (500,500))
@@ -216,7 +221,7 @@ def parseImage(image, pathToImage='',pathToThinned='',needThinLines=False, stepA
 					#print(parametricLine)
 					if (abs(parametricLine[0] - rho) < 10):
 
-						#print('averaging lines at angle', degrees)
+						print('averaging lines at angle', degrees)
 						#if (degrees == 90 or degrees == 0):
 						#	#print('update rho from ', parametricLine[0], ' to ', ((parametricLine[0] + rho)/2))
 						#	#print(degreesToRho[degrees][i])
@@ -284,21 +289,25 @@ def parseImage(image, pathToImage='',pathToThinned='',needThinLines=False, stepA
 	pointSet = set()
 	for c in centroids:
 		x,y = c
-		pointSet.add((int(x), int(y)))
+		pointSet.add((int(x)+buf, int(y)+buf))
 
 
 	#print(labels)
 	#print(stats)
 	#print(centroids)
 	showImage(blank, 'blank average', scale=True)
-	blank = np.zeros(blank.shape)
+	blank = np.zeros(image.shape)
+	blank[:,:,:] = image
 	for p in pointSet:
 		col, row = p
 		#sc = col-buf
 		#sr = row-buf
 		# if row < 0 or row > rows-1 or col < 0 or col > cols-1:
 		# 	continue
-		blank[row][col] = (255,255,255)
+		#row += buf
+		#col += buf
+		blank[row-2:row+2,col-2:col+2,:] = (0,255,0)
+		#blank[row][col] = (255,255,255)
 	showImage(blank)
 	cv2.imwrite('cc.png', blank)
 
@@ -458,13 +467,22 @@ def determineBounds(image, degreesToRho, grid=0, startingAngle=0, pointSet=set()
 	for angle in degreesToRho:
 		print('working on lines with angle ',angle)
 		for parametricLine in degreesToRho[angle]:
-			
+			# convert parametric coordinates to cartisian to prepare for referencing against the image
 			a = np.cos(parametricLine[1])
 			b = np.sin(parametricLine[1])
 			# x0 = a*degreesToRho[angle][0]
 			# y0 = b*degreesToRho[angle][0]
-			x0 = a*parametricLine[0]
-			y0 = b*parametricLine[0]
+			'''
+			3/11/2023 10:52pm
+			We need to account for the offset from the lines image
+			hardcode for now, maybe try to fix this upstream later
+
+			nvm lets do everything in the buffered image so we naturally get start and end
+			'''
+			x0 = a*(parametricLine[0]-10)
+			y0 = b*(parametricLine[0]-10)
+			x0 = a*(parametricLine[0])
+			y0 = b*(parametricLine[0])
 			#print('x0',x0)
 			#print('y0',y0)
 			### 3000 is arbitarty, I am trying to shoot every line off the page but might need to revisit for larger images
@@ -497,6 +515,7 @@ def determineBounds(image, degreesToRho, grid=0, startingAngle=0, pointSet=set()
 
 			# start at one end of the paper
 			# iterate through the line along the slope
+			#print(x1,y1,x2,y2)
 			vertical = False
 			start1 = True
 			slope = 0
@@ -512,7 +531,7 @@ def determineBounds(image, degreesToRho, grid=0, startingAngle=0, pointSet=set()
 				# get the slope with increasing column/y
 				slope = (row1 - row2) / (col1 - col2) 
 				start1 = False
-			
+			#print('send slope:',slope)
 			# walk along the line to determine the real bounds
 			# in this step, we will reference the original and try to rebuild the crease pattern with intersection accuracy
 			# first pass will check if this line is reasonably close to an intersection, if so, we can snap the line to it
@@ -871,24 +890,28 @@ def simpleReferenceImage(start, slope, intersections, lines, image, snapThreshol
 
 	# add a buffer to the image
 	buf = 10
+	
+	#image = addBuffer(image)
 	rows,cols,channels = image.shape
-	buff = addBuffer(image)
-	image = np.uint8(image)
-	colorThreshold = 300 # totally arbitary, not sure how this will play out for shorter line segments
+	#print(buff.shape)
+	#image = np.uint8(image)
+	#colorThreshold = 300 # totally arbitary, not sure how this will play out for shorter line segments
 	
 	
 	row1,col1 = start
 	#print('slope', slope)
+	#colorThreshold(image)
+
 	print("intial start:", start)
 
 	# find the intersection with the leftmost point
 	startRow, startCol = start = getStart((row1,col1), slope, rows-1, vertical=vertical)
 	#highlightPoint((startRow, startCol),image, supress=False)
 	print('before',startRow, startCol)
-	startRow = int(startRow) + buf
-	startCol = int(startCol) + buf
-	highlightPoint((startRow, startCol),image, supress=False)
-	highlightPoint((startRow, startCol),buff, supress=False)
+	startRow = int(startRow)# + buf
+	startCol = int(startCol)# + buf
+	#highlightPoint((startRow, startCol),image, supress=False)
+	#highlightPoint((startRow, startCol),buff, supress=False)
 	# start inside the square?
 	# use this to show which direction we are traveling?
 	# offset = (startRow + slope, startCol + 1)
@@ -906,7 +929,9 @@ def simpleReferenceImage(start, slope, intersections, lines, image, snapThreshol
 
 	'''
 	first = None
-	currentColor = [0,0,0]
+	#currentColor = [0,0,0]
+	kernel = 5
+
 
 	bounds = range(1)
 	if (vertical):
@@ -925,6 +950,14 @@ def simpleReferenceImage(start, slope, intersections, lines, image, snapThreshol
 	print('slope:',slope)
 	print('start:',start)
 	print('bounds:',bounds)
+
+	sr = min(rows-6, startRow)
+	sc = min(cols-6, startCol)
+	#print(image[sr:sr+kernel,sc:sc+kernel])
+	#print(image[sr:sr+kernel,sc:sc+kernel].flatten())
+	#startSet = set(image[sr:sr+kernel,sc:sc+kernel].flatten())
+	startSet = getColorSet(image[sr:sr+kernel,sc:sc+kernel])
+	print('start set:', startSet)
 
 	for offset in bounds:
 		checkRow = startRow + (slope*offset)
@@ -950,10 +983,14 @@ def simpleReferenceImage(start, slope, intersections, lines, image, snapThreshol
 		# consider adding a buffer to the reference image and doing a sliding window, this could help detect different thickness lines
 
 
-		colorDist = distance(currentColor, image[checkRowInt][checkColInt])
-		if colorDist > colorThreshold:
+		#colorDist = distance(currentColor, image[checkRowInt][checkColInt])
+		sr = min(rows-6, checkRowInt)
+		sc = min(rows-6, checkColInt)
+		currentSet = getColorSet(image[sr:sr+kernel,sc:sc+kernel])#set(image[sr:sr+kernel,sc:sc+kernel,:].flatten())
 
-			print('color changed from ', currentColor,'to',image[checkRowInt][checkColInt], 'at',(checkRowInt, checkColInt))
+		#if colorDist > colorThreshold:
+		if startSet != currentSet:
+			print('color changed from ', startSet,'to',currentSet, 'at',(checkRowInt, checkColInt))
 			# line has changed
 			if first is None:
 
@@ -972,20 +1009,21 @@ def simpleReferenceImage(start, slope, intersections, lines, image, snapThreshol
 				if distance(first, second) < minSegmentLength:
 					print("throw away segment of length", distance(first, second))
 					# this line is too short, throw away the current line segment
-					first = None
-
-				# add this line to the set
-				lineType = getLineType(currentColor)
-				lines[(first,second)] = lineType
-				print("add line",(first,second),lineType)
+					first = simpleSnap((checkRow-buf, checkCol-buf), intersections)
+				else:
+					# add this line to the set
+					lineType = getLineType(currentColor)
+					lines[(first,second)] = lineType
+					print("add line",(first,second),lineType)
 			highlightPoint((checkRowInt, checkColInt),image, supress=False)
-			currentColor = image[checkRowInt][checkColInt]
+			#currentColor = image[checkRowInt][checkColInt]
+			currentSet = startSet
 			print("")
 
-	if first is not None:
-		# finish an incomplete line
-		# might be able to get around this with buffer and border
-		print("didn't finish line")
+	# if first is not None:
+	# 	# finish an incomplete line
+	# 	# might be able to get around this with buffer and border
+	# 	print("didn't finish line")
 
 
 
@@ -1085,6 +1123,7 @@ def addBuffer(image, buf=10):
 	temp[:,cols-1,:] = color
 	temp[0,:,:] = color
 	temp[rows-1,:,:] = color
+
 	
 	out = np.zeros((rows+(2*buf), cols+(2*buf), 3))
 	out[:,:,:] = backgroundColor
@@ -1092,8 +1131,25 @@ def addBuffer(image, buf=10):
 	#showImage(out)
 	temp = out
 	temp = np.uint8(temp)
-	return temp
 
+	return temp
+def colorThreshold(image):
+	# convert image to only have blue, red, black, white
+	rows, cols, c = image.shape
+	for r in range(rows):
+		for c in range(cols):
+			color = image[r][c]
+			colors = [WHITE, BLACK, BLUE, RED]
+			d = [distance(color, c) for c in colors]
+			setColor = colors[d.index(min(d))]
+			image[r][c] = setColor
+	showImage(image, title='color threshold')
+def getColorSet(patch):
+	ba = patch[:,:,0].flatten()
+	ga = patch[:,:,1].flatten()
+	ra = patch[:,:,2].flatten()
+	colors = [(b,g,r) for b,g,r in zip(ba,ga,ra)]
+	return set(colors)
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser(description='Choose an input image')
 	parser.add_argument('pathToImage', type=str, help='path to image of crease pattern')
