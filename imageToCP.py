@@ -60,7 +60,10 @@ def main(args):
 	#blank[0:10, 0:10] = 255
 	#showImage(blank, '00')
 	
-
+	'''
+	3/12/2023 11:21
+	TODO: remove options for line thinning, it is definitely bait
+	'''
 
 	# use hough line transform to determine the location of lines in the input image
 	if (args.pathToThinned):
@@ -109,7 +112,7 @@ def parseImage(image, pathToImage='',pathToThinned='',needThinLines=False, stepA
 	showImage(image, 'received from main')
 	if (needThinLines):
 		image = cv2.resize(image, (500,500))
-		image = addImageBuffer(image)
+		image = addBuffer(image)
 		showImage(image, title='resize')
 		
 
@@ -216,6 +219,10 @@ def parseImage(image, pathToImage='',pathToThinned='',needThinLines=False, stepA
 				# hough transform is finding multiple lines, likely because lines are too thick
 				# for now, take the average of closely parallel lines
 				# later, reevaluate parameters to Canny or HoughLines, or perform preprocessing to thin lines
+				'''
+				3/12/2023 11:20am
+				Averaging on an extended view seems to work very well, line thinning was bait
+				'''
 				addToList = True
 				for i,parametricLine in enumerate(degreesToRho[degrees]):
 					#print(parametricLine)
@@ -289,7 +296,10 @@ def parseImage(image, pathToImage='',pathToThinned='',needThinLines=False, stepA
 	pointSet = set()
 	for c in centroids:
 		x,y = c
-		pointSet.add((int(x)+buf, int(y)+buf))
+
+		# back refernce the image to see if there are any lines here
+		# actually let's just push on for now, I think plant's method is better
+		pointSet.add((int(y)+buf, int(x)+buf))
 
 
 	#print(labels)
@@ -871,6 +881,10 @@ def simpleSnap(point, intersections, threshold=50):
 	minDistance = min(distanceToIntersections)
 	#print(minDistance)
 	if minDistance > threshold:
+		print("can't find snap point for ",point, 'with threshold',threshold)
+		for p,d in zip(intersections,distanceToIntersections):
+			print(p,':',d)
+		#print(distanceToIntersections)
 		return None
 	minIndex = distanceToIntersections.index(minDistance)
 	#print(minIndex)
@@ -908,6 +922,8 @@ def simpleReferenceImage(start, slope, intersections, lines, image, snapThreshol
 	startRow, startCol = start = getStart((row1,col1), slope, rows-1, vertical=vertical)
 	#highlightPoint((startRow, startCol),image, supress=False)
 	print('before',startRow, startCol)
+	#startRow, startCol = simpleSnap((startRow, startCol), intersections)
+	#print('snap start:', (startRow, startCol))
 	startRow = int(startRow)# + buf
 	startCol = int(startCol)# + buf
 	#highlightPoint((startRow, startCol),image, supress=False)
@@ -930,7 +946,7 @@ def simpleReferenceImage(start, slope, intersections, lines, image, snapThreshol
 	'''
 	first = None
 	#currentColor = [0,0,0]
-	kernel = 5
+	kernel = 7
 
 
 	bounds = range(1)
@@ -951,13 +967,25 @@ def simpleReferenceImage(start, slope, intersections, lines, image, snapThreshol
 	print('start:',start)
 	print('bounds:',bounds)
 
-	sr = min(rows-6, startRow)
-	sc = min(cols-6, startCol)
+	sr = min(rows-1-kernel, startRow)
+	sc = min(cols-1-kernel, startCol)
 	#print(image[sr:sr+kernel,sc:sc+kernel])
 	#print(image[sr:sr+kernel,sc:sc+kernel].flatten())
 	#startSet = set(image[sr:sr+kernel,sc:sc+kernel].flatten())
-	startSet = getColorSet(image[sr:sr+kernel,sc:sc+kernel])
+	rs = max(0, startRow - kernel)
+	re = min(rows-1,startRow + kernel)
+	cs = max(0, startCol - kernel)
+	ce = min(cols-1,startCol + kernel)
+	
+	print(rs, re, cs, ce)
+	#startSet = getColorSet(image[rs:re, cs:ce])
+	startSet = colorOrder(image[rs:re, cs:ce])
+
 	print('start set:', startSet)
+	startSet = ()
+	showImage(image[rs:re, cs:ce])
+
+	
 
 	for offset in bounds:
 		checkRow = startRow + (slope*offset)
@@ -966,13 +994,13 @@ def simpleReferenceImage(start, slope, intersections, lines, image, snapThreshol
 		# 	print(offset,(checkRow,checkCol))
 		if (vertical):
 			# handle the vertical line caes seperately
-			checkRow = startRow
+			checkRow = startRow + offset
 			checkCol = startCol	
 
-		finalRow, finalCol = (checkRow, checkCol)
+		#finalRow, finalCol = (checkRow, checkCol)
 		checkRowInt = int(round(checkRow))
 		checkColInt = int(round(checkCol))
-
+		#print('check:',(checkRowInt, checkColInt))
 		if (checkRowInt < 0 or checkRowInt >= rows or checkColInt < 0 or checkColInt >= cols):
 			#finalRow, finalCol = (checkRow, checkCol)
 			# protect image from referencing points out of bounds
@@ -984,40 +1012,53 @@ def simpleReferenceImage(start, slope, intersections, lines, image, snapThreshol
 
 
 		#colorDist = distance(currentColor, image[checkRowInt][checkColInt])
-		sr = min(rows-6, checkRowInt)
-		sc = min(rows-6, checkColInt)
-		currentSet = getColorSet(image[sr:sr+kernel,sc:sc+kernel])#set(image[sr:sr+kernel,sc:sc+kernel,:].flatten())
-
+		rs = max(0, checkRowInt - kernel)
+		re = min(rows-1,checkRowInt + kernel)
+		cs = max(0, checkColInt - kernel)
+		ce = min(cols-1,checkColInt + kernel)
+		
+		currentSet = colorOrder(image[rs:re, cs:ce])#set(image[sr:sr+kernel,sc:sc+kernel,:].flatten())
+		#print('current color order: ',currentSet)
+		#showImage(image[rs:re, cs:ce])
 		#if colorDist > colorThreshold:
 		if startSet != currentSet:
 			print('color changed from ', startSet,'to',currentSet, 'at',(checkRowInt, checkColInt))
+			'''
+			# don't need to do anything if the same color is in the lead?
+			'''
+			showImage(image[rs:re, cs:ce])
 			# line has changed
 			if first is None:
 
 				# this is the first point in the line
-				first = simpleSnap((checkRow-buf, checkCol-buf), intersections)
+				first = simpleSnap((checkRow, checkCol), intersections)
 				print('start line segment at',first)
 
 			else:
 				# we have already found a point in the line
 				# for now assume that there will be a close snap point
 				# I'm not sure if this will always be true
-				second = simpleSnap((checkRow-buf, checkCol-buf), intersections,threshold=9999)
+				second = simpleSnap((checkRow, checkCol), intersections,threshold=9999)
 				print('finish line segment at',second)
 
 				# check if this line is long enough (use this to reject passing through points)
-				if distance(first, second) < minSegmentLength:
+				if distance(first, second) < minSegmentLength or startSet == ():
 					print("throw away segment of length", distance(first, second))
-					# this line is too short, throw away the current line segment
-					first = simpleSnap((checkRow-buf, checkCol-buf), intersections)
+					print('throw away segment with color order: ', startSet)
+					# this line is too short, or was white, throw away the current line segment
+					first = simpleSnap((checkRow, checkCol), intersections, threshold=9999)
+					print("start new segment at ", first)
 				else:
-					# add this line to the set
-					lineType = getLineType(currentColor)
+					
+					lineType = getLineType(startSet[0])
+					#lineType = getLineType(currentColor)
 					lines[(first,second)] = lineType
 					print("add line",(first,second),lineType)
-			highlightPoint((checkRowInt, checkColInt),image, supress=False)
+					first = second
+					print('start new segment at',first)
+			#highlightPoint((checkRowInt, checkColInt),image, supress=False)
 			#currentColor = image[checkRowInt][checkColInt]
-			currentSet = startSet
+			startSet = currentSet
 			print("")
 
 	# if first is not None:
@@ -1043,10 +1084,10 @@ def getStart(point, slope, length, vertical=False):
 	#print('finding start for', point)
 	if (vertical):
 		# this is a vertical line, return the column intersection with row 0
-		return (0, col)
+		return (10, col)
 	elif (slope == 0):
 		# this is a horizontal line, return the row intersection with column 0
-		return (row,0)
+		return (row,10)
 	elif (col == 0):
 		# point is on the left edge, this is an optimal starting point
 		return point
@@ -1150,6 +1191,82 @@ def getColorSet(patch):
 	ra = patch[:,:,2].flatten()
 	colors = [(b,g,r) for b,g,r in zip(ba,ga,ra)]
 	return set(colors)
+
+'''
+Crappy hack for now
+'''
+def colorFromColorSet(colorSet):
+	removeOrder = [WHITE, BLACK]
+	if WHITE in colorSet:
+		colorSet.remove(WHITE)
+	if (len(colorSet)) == 1:
+		return list(colorSet)[0]
+	if BLACK in colorSet:
+		colorSet.remove(BLACK)
+	if len(colorSet) == 1:
+		return list(colorSet)[0]
+	else:
+		return BLACK
+
+'''
+When we are following a line, assume the most common color besides white will be the correct color
+In a window, get the number of black, blue, and red
+# only include colors that are actually present
+
+# In need this to return the same color order in the event of ties
+# ignore white, we don't actually care about it
+'''
+def colorOrder(patch):
+	rows, cols, c = patch.shape
+	b = patch[:,:,0]
+	g = patch[:,:,1]
+	r = patch[:,:,2]
+
+	numWhite = np.sum(np.where(g == 255, 1, 0))
+	numRed = np.sum(np.where(r == 255, 1, 0)) - numWhite
+	numBlue = np.sum(np.where(b == 255, 1, 0)) - numWhite
+	numBlack = (rows * cols) - (numWhite+numBlue+numRed)
+
+
+	#numWhite = np.sum(np.where(patch == WHITE, 1, 0))
+	#numBlack = np.sum(np.where(patch == BLACK, 1, 0))
+	#numBlue = np.sum(np.where(patch == BLUE, 1, 0))
+	#numRed = np.sum(np.where(patch == RED, 1, 0))
+
+	# if numBlack + numBlue + numRed == 0:
+	# 	return (WHITE)
+	colors = [WHITE,BLACK, BLUE, RED]
+	counts = [numWhite, numBlack, numBlue, numRed]
+	colors = [BLACK, BLUE, RED]
+	counts = [numBlack, numBlue, numRed]
+	#print(counts)
+	freq = {}
+	for i in range(3):
+		c = counts[i]
+		color = colors[i]
+		if c > 0:
+			if c in freq:
+				freq[c].append(color)
+			else:
+				freq[c] = [color]
+	keyOrder = list(freq.keys())
+	#print(freq)
+	keyOrder.sort(reverse=True)
+	order = []
+	for k in keyOrder:
+		for color in freq[k]:
+			order.append(color)
+
+	return tuple(order)
+
+'''
+We should only have a line going if there is a color
+try removing white and seeing what is left
+'''
+def getColorFromOrder(colorOrder):
+	colorOrder.remove(white)
+	return list(colorOrder)[0]
+
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser(description='Choose an input image')
 	parser.add_argument('pathToImage', type=str, help='path to image of crease pattern')
